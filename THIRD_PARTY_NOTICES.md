@@ -91,14 +91,12 @@ Los hashes y la procedencia de los PDF están en el
 [registro de referencias](desp_desktop_app/references/README.md). Se conserva
 la atribución de los autores; la inclusión no implica su aval de la aplicación.
 
-## Datos de medición
+## Datos de validación
 
-[easy_ama_jmpc/assets](easy_ama_jmpc/assets) contiene 14 archivos TXT y cinco MAT
-de mediciones. No se ha documentado en ese árbol su procedencia, titularidad ni
-permiso para distribución pública. No se les asigna la licencia del código.
-Los [casos sintéticos](desp_desktop_app/validation_data/README.md) se identifican
-por separado y se generan con las herramientas del proyecto.
+Los [casos sintéticos](desp_desktop_app/validation_data/README.md) incluidos se
+generan con las herramientas del proyecto y contienen desplazamientos de
+referencia para comprobar los cálculos.
 
 Queda pendiente aclarar la redistribución pública de la tesis, el artículo de
-Tokunaga, el correo JM y los datos reales. Este inventario registra esa situación;
+Tokunaga y el correo JM. Este inventario registra esa situación;
 no afirma que todos los archivos del repositorio dispongan ya de permiso público.
