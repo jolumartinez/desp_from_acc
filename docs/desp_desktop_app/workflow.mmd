@@ -1,0 +1,36 @@
+flowchart TD
+    A[Seleccionar carpeta] --> B[Elegir TXT y canal]
+    B --> C[Definir unidad y frecuencia]
+    C --> D[Cargar y convertir a SI]
+    D --> E[Inspeccionar tiempo y espectro]
+    E --> X{¿Señal completa?}
+    X -->|No| Y[Seleccionar intervalo y aplicar]
+    X -->|Sí| F{Método}
+    Y --> F
+    F --> TL[TL]
+    F --> CH[CH]
+    F --> CB[CB]
+    F --> BO[BO]
+    F --> WA[WA]
+    F --> DA[DA]
+    F --> PA[PA]
+    F --> BU[BU]
+    F --> JM[JM]
+    F --> TK[TK]
+    TL --> G[Resultados por etapa]
+    CH --> G
+    CB --> G
+    BO --> G
+    WA --> G
+    DA --> G
+    PA --> G
+    BU --> G
+    JM --> G
+    TK --> G
+    G --> V{¿resultado completo?}
+    V -- Sí --> N[Selector de etapa y anterior/siguiente]
+    V -- No --> P[Mostrar etapas alcanzadas y advertencia]
+    P --> N
+    N --> H[Comparar métodos]
+    H --> I[Seleccionar resultados]
+    I --> J[HTML + PDF + CSV + JSON]

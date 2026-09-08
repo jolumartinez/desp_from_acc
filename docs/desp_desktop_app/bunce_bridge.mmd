@@ -1,0 +1,20 @@
+flowchart LR
+    S[Segmento con reposo inicial] --> L[Entrada y salida del tren]
+    L --> W[Combinar inicios y finales]
+    W --> D[Ajuste lineal por ventana]
+    D --> I[Integrar a velocidad y desplazamiento]
+    I --> Q1{¿Levantamiento admisible?}
+    Q1 -- No --> X[Marcar fuera del límite]
+    Q1 -- Sí --> Q2[Medir planitud de hombros]
+    X --> Q2
+    Q2 --> M{¿Control ferroviario?}
+    M -- No --> A{¿hay ventanas aceptadas?}
+    M -- Sí --> G[Capturar B, sensor, longitud y m_i]
+    G --> T[Calcular P_i con duración o velocidad]
+    T --> P[Detectar recuperaciones por separación, anchura y prominencia]
+    P --> U[Asociar cada recuperación a un único P_i]
+    U --> Q3[Medir consistencia entre recuperaciones]
+    Q3 --> A
+    A -- Sí --> R[Ordenar ventanas aceptadas]
+    A -- No --> E[Advertir y ordenar todas como exploratorias]
+    E --> R

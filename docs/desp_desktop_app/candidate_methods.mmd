@@ -1,0 +1,24 @@
+flowchart TB
+    A[TXT de aceleración del puente]
+    A --> BU[Bunce 2023]
+    BU --> BU1[Reposo antes y después]
+    BU1 --> BU2[Ventanas + ajuste lineal]
+    BU2 --> BU3[Doble integración]
+    BU3 --> BU4[QC hombros y picos del tren]
+    BU4 --> P[Aplicable ahora]
+
+    A --> TOA[TOA 2023]
+    TOA --> TOA1[Ajustes combinados a/v/d]
+    TOA1 --> R1[Requiere formulación completa y benchmark]
+
+    A --> PR[PRISM]
+    PR --> PR1[Onset sísmico + filtro + ABC + QC]
+    PR1 --> R2[Útil como referencia QA; no específico para tren]
+
+    A --> CX[Optimización convexa]
+    CX --> CX1[Objetivo de desplazamiento residual]
+    CX1 --> R3[Requiere GNSS/LVDT/cámara o hipótesis residual cero]
+
+    A --> TF[HSA/EMD y VMD]
+    TF --> TF1[Separación adaptativa de baja frecuencia]
+    TF1 --> R4[Orientados a desplazamiento cosísmico permanente]

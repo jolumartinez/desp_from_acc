@@ -1,0 +1,8 @@
+flowchart LR
+    T[Tesis: texto y scripts] --> A[Auditoría de flujo]
+    A --> U[Pruebas unitarias e invariantes]
+    U --> S[Casos sintéticos con verdad conocida]
+    S --> R[Registros reales con referencia LVDT/GNSS]
+    R --> M[Contraste MATLAB/Python]
+    M --> C[Validación cuantitativa]
+    C --> P[Uso profesional controlado]
