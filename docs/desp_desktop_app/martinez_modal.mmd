@@ -1,0 +1,13 @@
+flowchart TD
+    A[Aceleración del canal y segmento activos] --> B[PSD de Welch]
+    B --> C[Umbral y picos candidatos]
+    C --> D[Ordenar por altura y seleccionar hasta N modos]
+    D --> E[Transferencias modales con amortiguamiento común]
+    A --> F[rFFT de la aceleración original]
+    E --> G[Contribuciones modales en frecuencia]
+    F --> G
+    G --> H[Superposición compleja]
+    H --> I[Transformada inversa: desplazamiento]
+    I --> J[Velocidad derivada para diagnóstico]
+    I --> K[Comparación e informe]
+    J --> K

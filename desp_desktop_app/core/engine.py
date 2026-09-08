@@ -20,6 +20,8 @@ from .signal_ops import (
     integrate_signal,
     polynomial_trend,
 )
+from .tokunaga import half_sine_spectrum, modal_load_time, train_spectrum
+from .train_geometry import DEFAULT_AXLE_SPACINGS_M, parse_axle_spacings
 
 
 _STEP_TRACE: ContextVar[list[ProcessStep] | None] = ContextVar("method_step_trace", default=None)
@@ -498,8 +500,8 @@ def _parse_increasing_positive_values(value: Any, label: str) -> np.ndarray:
         values = np.asarray([float(token) for token in tokens], dtype=float)
     except ValueError as exc:
         raise ValueError(f"{label} deben ser números separados por coma.") from exc
-    if np.any(values <= 0.0) or np.any(np.diff(values) <= 0.0):
-        raise ValueError(f"{label} deben ser positivos y crecientes.")
+    if not np.all(np.isfinite(values)) or np.any(values <= 0.0) or np.any(np.diff(values) <= 0.0):
+        raise ValueError(f"{label} deben ser finitos, positivos y crecientes.")
     return values
 
 
@@ -533,21 +535,43 @@ def _resolve_train_peak_offsets(
     elif source == "geometry":
         bridge_span = float(parameters["bridge_span_m"])
         sensor_position = float(parameters["sensor_position_m"])
-        train_length = float(parameters["train_length_m"])
-        if bridge_span <= 0.0 or train_length <= 0.0:
+        if not np.isfinite(bridge_span) or bridge_span <= 0.0:
             raise ValueError(
-                "Para calcular las recuperaciones por geometría, la luz del puente y la longitud "
-                "entre ejes extremos deben ser mayores que cero."
+                "Para calcular las recuperaciones por geometría, la luz del puente debe ser finita y mayor que cero."
             )
-        if sensor_position < 0.0 or sensor_position > bridge_span:
+        if not np.isfinite(sensor_position) or sensor_position < 0.0 or sensor_position > bridge_span:
             raise ValueError(
                 "La posición del acelerómetro debe estar entre 0 y la luz del puente, "
                 "medida desde el apoyo de entrada."
             )
-        midpoints = _parse_increasing_positive_values(
-            parameters["peak_midpoint_distances_m"],
-            "Las distancias de los puntos medios m_i",
+        # Direct calls from older integrations supplied lengths and midpoints.
+        # New UI/API calls select the geometry mode explicitly.
+        legacy_geometry = any(
+            key in parameters for key in ("train_length_m", "peak_midpoint_distances_m")
         )
+        geometry_mode = str(parameters.get(
+            "train_geometry_mode", "manual_midpoints" if legacy_geometry else "axle_spacings"
+        ))
+        geometry_diagnostics: dict[str, Any] = {"train_geometry_mode": geometry_mode}
+        if geometry_mode == "axle_spacings":
+            positions = parse_axle_spacings(parameters.get("axle_spacings_m", DEFAULT_AXLE_SPACINGS_M))
+            train_length = float(positions[-1])
+            midpoints = positions[:-1] + 0.5 * np.diff(positions)
+            geometry_diagnostics.update({
+                "train_axle_count": int(positions.size),
+                "train_axle_positions_m": positions.tolist(),
+                "train_axle_spacings_m": np.diff(positions).tolist(),
+            })
+        elif geometry_mode == "manual_midpoints":
+            train_length = float(parameters["train_length_m"])
+            if not np.isfinite(train_length) or train_length <= 0.0:
+                raise ValueError("La longitud entre ejes extremos debe ser finita y mayor que cero.")
+            midpoints = _parse_increasing_positive_values(
+                parameters["peak_midpoint_distances_m"],
+                "Las distancias de los puntos medios m_i",
+            )
+        else:
+            raise ValueError(f"Modo de geometría ferroviaria desconocido: {geometry_mode}")
         if midpoints.size < 2:
             raise ValueError(
                 "El control ferroviario necesita al menos dos puntos medios m_i de recuperación. "
@@ -559,8 +583,12 @@ def _resolve_train_peak_offsets(
             )
 
         total_crossing_distance = bridge_span + train_length
+        if not np.isfinite(total_crossing_distance):
+            raise ValueError("La distancia total de paso del tren debe ser finita.")
         distances_to_sensor = midpoints + sensor_position
         event_duration = event_end - event_start
+        if not np.isfinite(event_duration) or event_duration <= 0.0:
+            raise ValueError("La duración observada del paso debe ser finita y mayor que cero.")
         timing_basis = str(parameters["train_timing_basis"])
         if timing_basis == "event_duration":
             effective_speed = total_crossing_distance / event_duration
@@ -568,9 +596,9 @@ def _resolve_train_peak_offsets(
             predicted_duration = event_duration
         elif timing_basis == "speed":
             speed_kmh = float(parameters["train_speed_kmh"])
-            if speed_kmh <= 0.0:
+            if not np.isfinite(speed_kmh) or speed_kmh <= 0.0:
                 raise ValueError(
-                    "La velocidad aproximada debe ser mayor que cero cuando se usa como base temporal."
+                    "La velocidad aproximada debe ser finita y mayor que cero cuando se usa como base temporal."
                 )
             effective_speed = speed_kmh / 3.6
             offsets = distances_to_sensor / effective_speed
@@ -580,6 +608,7 @@ def _resolve_train_peak_offsets(
 
         duration_difference = predicted_duration - event_duration
         diagnostics = {
+            **geometry_diagnostics,
             "train_peak_source": "geometry",
             "train_timing_basis": timing_basis,
             "bridge_span_m": bridge_span,
@@ -1556,6 +1585,641 @@ def _run_wang(record: SignalRecord, p: dict[str, Any]) -> MethodResult:
     return _result(record, "wang", p, steps, adjusted, velocity, displacement, {"arrival_s": float(t[arrival_index]), "pre_event_mean_mps2": pre_mean, "t_pga_s": float(t[pga_index]), "t_final_energy_s": float(t[final_index]), "noise_metric": noise_metric, "noise_level_mps2": noise_level, "search_divisions": density, "search_step_s": search_step, "step_search_mode": step_mode, "t1_s": t1, "t2_s": t2, "t3_s": t3, "step_target_m": target_step, "step_displacement_m": residual, "search_mse": error}, started)
 
 
+def _run_martinez_2024(record: SignalRecord, p: dict[str, Any]) -> MethodResult:
+    """Reproduce the final modal-superposition plot of the original implementation."""
+    started = perf_counter()
+    t, a = record.time_s, record.acceleration_mps2
+    reference = (
+        "Jorge Luis Martínez Valencia, propuesta de noviembre de 2024, pp. 1-2; "
+        "función calculate_displacement_superposition_psd de la implementación original."
+    )
+
+    def integer_parameter(key: str, lower: int, upper: int) -> int:
+        value = float(p[key])
+        if isinstance(p[key], (bool, np.bool_)) or not np.isfinite(value) or not value.is_integer():
+            raise ValueError(f"{key} debe ser un número entero.")
+        if not lower <= value <= upper:
+            raise ValueError(f"{key} debe estar entre {lower} y {upper}.")
+        return int(value)
+
+    num_modes = integer_parameter("num_modes", 1, 200)
+    requested_nperseg = integer_parameter("welch_nperseg", 4, 65_536)
+    damping = float(p["damping_ratio"])
+    threshold_ratio = float(p["peak_threshold_ratio"])
+    if not np.isfinite(damping) or not 0.0 < damping <= 1.0:
+        raise ValueError("El amortiguamiento modal debe ser mayor que cero y no superar 1.")
+    if not np.isfinite(threshold_ratio) or not 0.0 <= threshold_ratio <= 1.0:
+        raise ValueError("El umbral relativo de la PSD debe estar entre 0 y 1.")
+    intervals = np.diff(t)
+    dt = float(intervals[0])
+    if not np.allclose(intervals, dt, rtol=1.0e-5, atol=1.0e-9):
+        raise ValueError("La superposición modal requiere muestreo uniforme; reconstruye el eje temporal antes de calcular.")
+    if not np.isclose(1.0 / record.sampling_rate_hz, dt, rtol=1.0e-5, atol=1.0e-9):
+        raise ValueError("La frecuencia de muestreo no coincide con los intervalos del eje temporal.")
+    fs = 1.0 / dt
+    nperseg = min(requested_nperseg, a.size)
+
+    steps = [
+        _step(
+            "raw_acceleration",
+            "Aceleración de entrada",
+            _explanation(
+                "el canal seleccionado en m/s², con su media original",
+                "reproducir la entrada de la propuesta sin filtrado ni corrección de línea base",
+                "el método es una estimación modal empírica; la aceleración original se conserva para referencia",
+                reference,
+            ),
+            t, {"Original": a}, "Aceleración [m/s²]",
+        )
+    ]
+
+    def frequency_step(
+        key: str, title: str, description: str, frequency: np.ndarray,
+        series: dict[str, np.ndarray], y_label: str,
+        styles: dict[str, str] | None = None,
+    ) -> ProcessStep:
+        return _record_step(ProcessStep(
+            key, title, description, frequency, series,
+            "Frecuencia [Hz]", y_label, styles or {},
+        ))
+
+    def one_sided_amplitude(spectrum: np.ndarray) -> np.ndarray:
+        amplitude = 2.0 * np.abs(spectrum) / a.size
+        amplitude[0] *= 0.5
+        if a.size % 2 == 0:
+            amplitude[-1] *= 0.5
+        return amplitude
+
+    frequencies = np.fft.rfftfreq(a.size, d=1.0 / fs)
+    omega = 2.0 * np.pi * frequencies
+    acceleration_fft = np.fft.rfft(a)
+    steps.append(frequency_step(
+        "raw_spectrum", "FFT de la aceleración",
+        _explanation(
+            "el espectro unilateral de aceleración, incluida la componente de frecuencia cero",
+            "preparar la señal completa que multiplicará cada función de transferencia modal",
+            "no se enmascaran frecuencias ni se elimina la media; los picos elegidos definen las transferencias",
+            reference,
+        ),
+        frequencies, {"Amplitud": one_sided_amplitude(acceleration_fft)}, "Aceleración [m/s²]",
+    ))
+    psd_frequencies, psd = scipy_signal.welch(a, fs=fs, nperseg=nperseg)
+    threshold = float(np.max(psd)) * threshold_ratio
+    peak_indices, _ = scipy_signal.find_peaks(psd, height=threshold)
+    peak_markers = np.full_like(psd, np.nan)
+    peak_markers[peak_indices] = psd[peak_indices]
+    steps.append(frequency_step(
+        "welch_psd", "PSD de Welch y detección de picos",
+        _explanation(
+            f"la densidad espectral con segmentos de {nperseg} muestras y {peak_indices.size} picos sobre el umbral",
+            f"localizar máximos con altura de al menos {100.0 * threshold_ratio:g} % del máximo global de la PSD",
+            "Welch retira la media de cada segmento sólo para estimar la PSD; la FFT de entrada sigue intacta",
+            reference,
+        ),
+        psd_frequencies,
+        {"PSD": psd, "Umbral": np.full_like(psd, threshold), "Picos detectados": peak_markers},
+        "PSD [(m/s²)²/Hz]", {"Umbral": "dashed", "Picos detectados": "points"},
+    ))
+    ranking = np.argsort(psd[peak_indices])[::-1]
+    selected_indices = peak_indices[ranking][:num_modes]
+    selected_frequencies = psd_frequencies[selected_indices]
+    selected_markers = np.full_like(psd, np.nan)
+    selected_markers[selected_indices] = psd[selected_indices]
+    steps.append(frequency_step(
+        "modal_selection", "Selección de frecuencias modales",
+        _explanation(
+            f"los {selected_indices.size} picos seleccionados de un máximo solicitado de {num_modes}",
+            "ordenar los picos por altura de PSD decreciente y conservar los primeros N, como en el código original",
+            "son candidatos espectrales, no una identificación física de modos; DC y Nyquist no son picos interiores",
+            reference,
+        ),
+        psd_frequencies, {"PSD": psd, "Modos seleccionados": selected_markers},
+        "PSD [(m/s²)²/Hz]", {"Modos seleccionados": "points"},
+    ))
+    if selected_indices.size == 0:
+        raise ValueError(
+            "No se detectaron picos interiores en la PSD que cumplan el umbral. "
+            "Revisa el segmento, la longitud de Welch o el umbral; no puede estimarse la respuesta modal."
+        )
+
+    displacement_fft = np.zeros_like(acceleration_fft, dtype=complex)
+    total_transfer = np.zeros_like(acceleration_fft, dtype=complex)
+    epsilon = 1.0e-6
+    regularized_bin_count = 0
+    for index, modal_frequency in enumerate(selected_frequencies):
+        modal_omega = 2.0 * np.pi * modal_frequency
+        modal_mass = 1
+        modal_damping = 2 * modal_mass * modal_omega * damping
+        modal_stiffness = modal_mass * modal_omega**2
+        denominator = -modal_mass * omega**2 + 1j * modal_damping * omega + modal_stiffness
+        regularized = np.abs(denominator) < epsilon
+        regularized_bin_count += int(np.count_nonzero(regularized))
+        denominator = np.where(regularized, denominator + epsilon, denominator)
+        transfer = 1.0 / denominator
+        contribution_fft = transfer * acceleration_fft
+        displacement_fft += contribution_fft
+        total_transfer += transfer
+        contribution = np.fft.irfft(contribution_fft, n=a.size)
+        steps.append(_step(
+            f"modal_contribution_{index + 1:03d}",
+            f"Aporte modal {index + 1}: {modal_frequency:.6g} Hz",
+            _explanation(
+                f"la contribución temporal del pico {index + 1}, con frecuencia {modal_frequency:.6g} Hz y ζ={damping:g}",
+                "aplicar Hₙ(ω)=1/(ωₙ²−ω²+2jζωₙω) a toda la FFT y transformar su respuesta al tiempo",
+                "la masa modal se fija en uno; esta curva contribuye a la suma sin eliminar las otras frecuencias de entrada",
+                reference,
+            ),
+            t, {f"Modo {index + 1}": contribution}, "Desplazamiento [m]",
+        ))
+
+    steps.append(frequency_step(
+        "modal_transfer_amplitude", "Amplitud de la transferencia modal total",
+        _explanation(
+            "el módulo de la suma compleja de todas las funciones de transferencia seleccionadas",
+            "visualizar la ganancia conjunta aplicada al espectro de aceleración",
+            "la suma es compleja; no equivale a sumar módulos ni a efectuar una doble integración exacta",
+            reference,
+        ),
+        frequencies, {"|Σ Hₙ|": np.abs(total_transfer)}, "Ganancia [s²]",
+    ))
+    steps.append(frequency_step(
+        "modal_transfer_phase", "Fase de la transferencia modal total",
+        _explanation(
+            "la fase principal de la transferencia conjunta, en radianes",
+            "hacer visible el desfase que introduce el amortiguamiento modal",
+            "los saltos entre −π y π corresponden a la representación angular; la fase es indefinida si el módulo es cero",
+            reference,
+        ),
+        frequencies, {"Fase de Σ Hₙ": np.angle(total_transfer)}, "Fase [rad]",
+    ))
+    displacement = np.fft.irfft(displacement_fft, n=a.size)
+    steps.append(frequency_step(
+        "modal_displacement_spectrum", "Espectro del desplazamiento reconstruido",
+        _explanation(
+            "el espectro unilateral de la señal obtenida por transformada inversa de la suma modal",
+            "comprobar el contenido frecuencial del resultado, incluida su componente constante",
+            "un sesgo de aceleración puede producir desplazamiento medio distinto de cero; no se fuerza equilibrio ni residual nulo",
+            reference,
+        ),
+        frequencies, {"Desplazamiento": one_sided_amplitude(np.fft.rfft(displacement))},
+        "Desplazamiento [m]",
+    ))
+    velocity = derivative(displacement, t)
+    steps.append(_step(
+        "derived_velocity", "Velocidad derivada del desplazamiento",
+        _explanation(
+            "la derivada numérica del desplazamiento modal respecto al tiempo",
+            "ofrecer una velocidad auxiliar compatible con las comparaciones y exportaciones de la aplicación",
+            "no es una etapa del algoritmo original ni la integral de la aceleración medida; los extremos usan diferencias unilaterales",
+            reference,
+        ),
+        t, {"Velocidad derivada": velocity}, "Velocidad [m/s]",
+    ))
+    steps.append(_step(
+        "final_displacement", "Desplazamiento por superposición modal",
+        _explanation(
+            f"la transformada inversa de la suma de las {selected_indices.size} respuestas modales",
+            "reproducir la última gráfica de la implementación original con sus parámetros explícitos",
+            "es una propuesta empírica con masa unitaria y amortiguamiento común; requiere contraste con una referencia de desplazamiento",
+            reference,
+        ),
+        t, {"Desplazamiento": displacement}, "Desplazamiento [m]",
+    ))
+    return _result(
+        record, "martinez_2024", p, steps, a, velocity, displacement,
+        {
+            "requested_num_modes": num_modes,
+            "detected_peak_count": int(peak_indices.size),
+            "selected_mode_count": int(selected_indices.size),
+            "selected_frequencies_hz": selected_frequencies.tolist(),
+            "selected_peak_psd": psd[selected_indices].tolist(),
+            "welch_nperseg_requested": requested_nperseg,
+            "welch_nperseg_effective": nperseg,
+            "welch_frequency_resolution_hz": fs / nperseg,
+            "effective_sampling_rate_hz": fs,
+            "peak_threshold_ratio": threshold_ratio,
+            "peak_threshold_psd": threshold,
+            "damping_ratio": damping,
+            "modal_mass": 1.0,
+            "denominator_epsilon": epsilon,
+            "regularized_bin_count": regularized_bin_count,
+            "dc_policy": "preserved",
+            "input_acceleration_mean_mps2": float(np.mean(a)),
+            "displacement_mean_m": float(np.mean(displacement)),
+            "velocity_source": "gradient_of_displacement",
+            "acceleration_source": "unmodified_input",
+            "model_assumptions": "Propuesta empírica; masa modal unitaria y amortiguamiento común; no identifica modos físicos.",
+        },
+        started,
+    )
+
+
+def _run_tokunaga_bridge(record: SignalRecord, p: dict[str, Any]) -> MethodResult:
+    """Tokunaga et al. 2022, equations 16–19 and 27–29, with explicit FFT safeguards."""
+    started = perf_counter()
+    t, raw = record.time_s, record.acceleration_mps2
+    reference = "Tokunaga, Ikeda y Yoshida (2022): ecuaciones 2 y 3c (p. 48), 16–19 y 27–29 (pp. 50–53), 33 (p. 54) y apéndice (p. 59)."
+    steps = [_step(
+        "raw_acceleration", "Aceleración de entrada",
+        _explanation("la aceleración vertical original en unidades SI", "conservar la medición antes de acondicionar",
+                     "el modelo representa el punto del sensor en un vano simplemente apoyado, bajo una única vía", reference),
+        t, {"Original": raw}, "Aceleración [m/s²]",
+    )]
+
+    def scalar(key: str, *, positive: bool = True) -> float:
+        value = float(p[key])
+        if isinstance(p[key], (bool, np.bool_)) or not np.isfinite(value) or (positive and value <= 0.0):
+            raise ValueError(f"El parámetro {key} debe ser finito" + (" y mayor que cero." if positive else "."))
+        return value
+
+    def whole(key: str, upper: int) -> int:
+        value = scalar(key)
+        if not value.is_integer() or value > upper:
+            raise ValueError(f"El parámetro {key} debe ser un entero entre 1 y {upper}.")
+        return int(value)
+
+    span = scalar("bridge_span_m")
+    speed = scalar("train_speed_kmh") / 3.6
+    sensor_position = scalar("sensor_position_m", positive=False)
+    if not 0.0 < sensor_position < span:
+        raise ValueError("La posición del acelerómetro debe estar dentro del vano: 0 < x < Lb, desde el apoyo de entrada.")
+    sensor_factor = float(np.sin(np.pi * sensor_position / span))
+    if sensor_factor < 1e-6:
+        raise ValueError("El sensor está demasiado cerca de un apoyo para identificar la respuesta del primer modo.")
+    geometry_mode = str(p["train_geometry_mode"])
+    if geometry_mode == "axle_spacings":
+        positions = parse_axle_spacings(p["axle_spacings_m"])
+        geometry_description = f"los {positions.size} ejes definidos por separaciones consecutivas, con longitud entre extremos {positions[-1]:g} m"
+    elif geometry_mode == "regular_vehicles":
+        count = whole("vehicle_count", 200)
+        length = scalar("vehicle_length_m")
+        axle_spacing = scalar("axle_spacing_m")
+        bogie_spacing = scalar("bogie_spacing_m")
+        if not axle_spacing < bogie_spacing or axle_spacing + bogie_spacing >= length:
+            raise ValueError("La geometría debe cumplir 0 < a < b y a+b < Lv; cada vehículo tiene cuatro ejes.")
+        positions = (np.arange(count)[:, None] * length + np.array([0.0, axle_spacing, bogie_spacing, axle_spacing + bogie_spacing])).ravel()
+        geometry_description = f"los {positions.size} ejes de {count} vehículos, en 0, a, b, a+b por vehículo"
+    else:
+        raise ValueError("Selecciona separaciones consecutivas de ejes o vehículos regulares para la geometría del tren.")
+    damping = scalar("damping_ratio")
+    padding = whole("padding_factor", 8)
+    floor = scalar("spectral_floor_ratio", positive=False)
+    if not 0.0 <= floor <= 0.5:
+        raise ValueError("El umbral relativo de ceros debe estar entre 0 y 0.5.")
+    if damping > 0.5:
+        raise ValueError("El amortiguamiento ζ debe estar entre 0 y 0.5, excluido cero.")
+    direction = str(p["deflection_direction"])
+    if direction not in {"negative", "positive"}:
+        raise ValueError("Selecciona el signo positivo o negativo de la flecha según la polaridad del sensor.")
+    sign = -1.0 if direction == "negative" else 1.0
+    if not isinstance(p["remove_acceleration_mean"], (bool, np.bool_)):
+        raise ValueError("Retirar media debe ser una opción booleana.")
+
+    dt = float(np.median(np.diff(t)))
+    if not np.allclose(np.diff(t), dt, rtol=1e-5, atol=1e-9):
+        raise ValueError("Tokunaga requiere muestreo uniforme; reconstruye el eje temporal antes de calcular.")
+    if not np.isclose(record.sampling_rate_hz * dt, 1.0, rtol=1e-5):
+        raise ValueError("La frecuencia de muestreo no coincide con los intervalos del registro.")
+    nyquist = 0.5 / dt
+    frequency_mode = str(p["frequency_mode"])
+    if frequency_mode == "span_estimate":
+        fb = 50.0 * span ** -0.8
+        frequency_source = "aproximación por luz, fb=50·Lb^(-0.8), ecuación 33"
+    elif frequency_mode == "manual":
+        fb = scalar("natural_frequency_hz")
+        frequency_source = "frecuencia introducida por el analista"
+    else:
+        raise ValueError("Selecciona frecuencia aproximada por luz o frecuencia introducida por el analista.")
+    if fb >= nyquist:
+        raise ValueError("La frecuencia propia debe estar por debajo de Nyquist.")
+    entry_mode = str(p["entry_mode"])
+    if entry_mode == "automatic":
+        entry, _, event_envelope, event_threshold = _automatic_load_interval(record)
+        steps.append(_step(
+            "entry_detection", "Estimación de entrada por energía",
+            _explanation(f"la envolvente RMS y el umbral que proponen t₀={entry:.6g} s",
+                         "iniciar el cálculo cuando no se conoce el instante de entrada",
+                         "ayuda DESP: ruido y vibración previa pueden desplazar la detección; revisa la marca y corrige t₀ manualmente. El fin de la envolvente no se usa como salida del tren", reference),
+            t, {"Envolvente RMS": event_envelope, "Umbral": np.full_like(t, event_threshold)},
+            "Aceleración RMS [m/s²]", {"Umbral": "dashed"},
+        ))
+    elif entry_mode == "manual":
+        entry = scalar("entry_time_s", positive=False)
+    else:
+        raise ValueError("Selecciona entrada automática por energía o entrada manual del primer eje.")
+    axle_entries = entry + positions / speed
+    exit_time = entry + (positions[-1] + span) / speed
+    if entry < t[0] or exit_time > t[-1]:
+        raise ValueError(
+            f"El registro debe contener el paso completo: entrada {entry:.4f} s y salida calculada {exit_time:.4f} s. "
+            "Amplía el segmento o revisa la entrada manual, la velocidad y la geometría."
+        )
+    marker_height = max(float(np.max(np.abs(raw))), np.finfo(float).eps)
+    marker_series = {}
+    for label, at in (("Entrada del primer eje", entry), ("Salida del último eje", exit_time)):
+        marker = np.full_like(t, np.nan)
+        marker[int(np.argmin(np.abs(t - at)))] = marker_height
+        marker_series[label] = marker
+    steps.append(_step(
+        "load_interval", "Entrada y salida geométrica del tren",
+        _explanation(f"t₀={entry:.6g} s y salida={exit_time:.6g} s, con duración (Lb+{positions[-1]:g})/v",
+                     "comprobar que la señal contiene el paso completo y vibración libre posterior",
+                     "t₀ es la entrada al apoyo, no el paso por el sensor; la salida se calcula con la velocidad y el último eje", reference),
+        t, {"Aceleración": raw, **marker_series}, "Aceleración [m/s²]",
+        {label: "points" for label in marker_series},
+    ))
+    wb = 2.0 * np.pi * fb
+    mode = str(p["band_mode"])
+    if mode == "publication":
+        f1, f2 = max(2.0 / (2.0 * np.pi), 0.1 * fb), 0.6 * fb
+        fm = max(0.2 / (2.0 * np.pi), 0.6 * fb)
+    elif mode == "manual":
+        f1, f2, fm = (scalar(key) for key in ("fit_min_hz", "fit_max_hz", "replacement_hz"))
+    else:
+        raise ValueError("Las bandas deben seguir la publicación o ser definidas por el analista.")
+    if not 0.0 < f1 < f2 < fb or not 0.0 < fm < fb:
+        raise ValueError("Se requieren 0 < f₁ < f₂ < fb y 0 < fm < fb; revisa la frecuencia propia y las bandas.")
+    n_fft = raw.size * padding
+    if n_fft > 4_000_000:
+        raise ValueError("La FFT supera cuatro millones de muestras; reduce el factor de relleno o la ventana de análisis.")
+
+    def spectrum_step(key: str, title: str, what: str, why: str, interpretation: str,
+                      x: np.ndarray, series: dict[str, np.ndarray], units: str,
+                      styles: dict[str, str] | None = None) -> ProcessStep:
+        return _record_step(ProcessStep(key, title, _explanation(what, why, interpretation, reference),
+                                       x, series, "Frecuencia [Hz]", units, styles or {}))
+
+    tail = raw[t > exit_time]
+    if tail.size >= 16:
+        tail_frequency, tail_psd = scipy_signal.periodogram(
+            tail, fs=record.sampling_rate_hz, window="hann", detrend="linear", scaling="density",
+        )
+        display_frequency = np.unique(np.append(tail_frequency, fb))
+        display_psd = np.interp(display_frequency, tail_frequency, tail_psd)
+        frequency_marker = np.full_like(display_frequency, np.nan)
+        frequency_marker[display_frequency == fb] = np.interp(fb, tail_frequency, tail_psd)
+        steps.append(spectrum_step(
+            "free_vibration_spectrum", "Vibración posterior: diagnóstico de frecuencia",
+            f"la PSD de la señal posterior a {exit_time:.6g} s y la frecuencia usada fb={fb:.6g} Hz ({frequency_source})",
+            "ayudar a contrastar la frecuencia del modelo con vibración libre después del tren",
+            f"no se identifica automáticamente un modo; ruido u otras cargas pueden dominar. El apéndice propone explorar {30.0 * span ** -0.8:.4g}–{120.0 * span ** -0.8:.4g} Hz para sus puentes; confirma el pico en varios pasos. Resolución de la cola: {record.sampling_rate_hz / tail.size:.4g} Hz", display_frequency,
+            {"PSD posterior al paso": display_psd, "fb usada": frequency_marker}, "PSD [(m/s²)²/Hz]",
+            {"fb usada": "points"},
+        ))
+    steps.append(_record_step(ProcessStep(
+        "train_geometry", "Geometría de los ejes",
+        _explanation(geometry_description,
+                     "definir las fases de entrada de cada carga", "se suponen cargas iguales; la altura unitaria no es un peso medido", reference),
+        positions, {"Ejes de igual carga": np.ones(positions.size)},
+        "Distancia desde el primer eje [m]", "Carga relativa [1]", {"Ejes de igual carga": "points"},
+    )))
+    mode_positions = np.unique(np.append(np.linspace(0.0, span, 101), sensor_position))
+    sensor_marker = np.full_like(mode_positions, np.nan)
+    sensor_marker[mode_positions == sensor_position] = sensor_factor
+    steps.append(_record_step(ProcessStep(
+        "sensor_mode_shape", "Posición del sensor y primer modo",
+        _explanation(f"φ(x)=sin(πx/Lb), con x={sensor_position:g} m y φ={sensor_factor:.6g}",
+                     "evaluar la respuesta del modelo en el punto de medida mediante la ecuación 2",
+                     "el resultado es desplazamiento en el sensor; φ se absorbe en la escala ajustada y no convierte la respuesta a centro de vano", reference),
+        mode_positions, {"Forma del primer modo": np.sin(np.pi * mode_positions / span), "Sensor": sensor_marker},
+        "Distancia desde el apoyo de entrada [m]", "Forma modal [1]", {"Sensor": "points"},
+    )))
+    relative_time = t - t[0]
+    entry_offset = entry - t[0]
+    forcing = modal_load_time(relative_time, span, speed, positions, entry_offset)
+    single_forcing = modal_load_time(relative_time, span, speed, np.array([0.0]), entry_offset)
+    steps.append(_step(
+        "modal_loading", "Paso del tren y carga modal relativa",
+        _explanation(f"λ(t), con entrada {entry:g} s y salida {exit_time:g} s", "representar el primer modo bajo todos los ejes",
+                     "cada eje aporta un semiseno durante Lb/v; λ no se divide por su máximo", reference),
+        t, {"Todos los ejes": forcing, "Primer eje": single_forcing}, "Carga modal relativa [1]", {"Primer eje": "dashed"},
+    ))
+    mean_removed = float(np.mean(raw)) if p["remove_acceleration_mean"] else 0.0
+    acceleration = raw - mean_removed
+    steps.append(_step(
+        "conditioned_acceleration", "Acondicionamiento para la FFT",
+        _explanation(f"la señal y la media retirada ({mean_removed:.6g} m/s²)", "evitar que el sesgo genere fugas al rellenar con ceros",
+                     "esta opción y el relleno son salvaguardas DESP; no corrigen tendencias ni fijan el desplazamiento final", reference),
+        t, {"Original": raw, "Para FFT": acceleration, "Media retirada": np.full_like(t, mean_removed)},
+        "Aceleración [m/s²]", {"Media retirada": "dashed"},
+    ))
+    frequency = np.fft.rfftfreq(n_fft, dt)
+    omega = 2.0 * np.pi * frequency
+    # The analytical F_lambda has units s: use dt*DFT throughout, and undo dt on inversion.
+    measured_a = dt * np.fft.rfft(acceleration, n=n_fft)
+    original_a = dt * np.fft.rfft(raw, n=n_fft)
+    steps.append(spectrum_step(
+        "acceleration_spectrum", "Espectro de aceleración y componente continua",
+        "las magnitudes de dt·rFFT(a), incluida frecuencia cero", "fijar una normalización compatible con la transformada teórica continua",
+        f"el relleno ×{padding} interpola la rejilla; no aporta información medida", frequency,
+        {"Original": np.abs(original_a), "Para cálculo": np.abs(measured_a)}, "Espectro [m/s²·s]",
+    ))
+    if geometry_mode == "regular_vehicles":
+        within_bogie = 1.0 + np.exp(-1j * omega * axle_spacing / speed)
+        between_bogies = 1.0 + np.exp(-1j * omega * bogie_spacing / speed)
+        vehicles = np.zeros_like(omega, dtype=complex)
+        for car in range(count):
+            vehicles += np.exp(-1j * omega * car * length / speed)
+        train_factors = {"Ejes del bogie |Fa|": np.abs(within_bogie), "Bogies |Fb|": np.abs(between_bogies), "Vehículos |FLv|": np.abs(vehicles)}
+        factor_description = "los factores de ejes, bogies y repetición entre vehículos"
+    else:
+        axle_sum = np.zeros_like(omega, dtype=complex)
+        for position in positions:
+            axle_sum += np.exp(-1j * omega * position / speed)
+        train_factors = {"Suma de fases de todos los ejes": np.abs(axle_sum)}
+        factor_description = "la suma finita de fases Σ exp(−iω·d_j/v) para las posiciones reales de los ejes (ecuación 3c)"
+    steps.append(spectrum_step(
+        "train_spectral_factors", "Factores espectrales del tren",
+        factor_description, "hacer visibles los ceros y máximos producidos por la geometría",
+        "los picos de estos factores son excitaciones del tren, no modos identificados del puente", frequency,
+        train_factors, "Factor [1]",
+    ))
+    force_spectrum = train_spectrum(omega, span, speed, positions, entry_offset)
+    pulse_spectrum = half_sine_spectrum(omega, span / speed)
+    steps.append(spectrum_step(
+        "modal_force_spectrum", "Espectro de la carga modal Fλ",
+        "la transformada continua del semiseno y de la suma de ejes", "construir la excitación teórica con sus fases",
+        "la suma finita y la expresión sinc evalúan los límites 0/0 sin alterar las ecuaciones", frequency,
+        {"Un eje |Fωv|": np.abs(pulse_spectrum), "Tren |Fλ|": np.abs(force_spectrum)}, "Espectro [s]",
+    ))
+    sd = 1.0 / (1.0 - (omega / wb) ** 2 + 2j * damping * omega / wb)
+    steps.append(spectrum_step(
+        "displacement_transfer", "Transferencia normalizada Sd",
+        f"la amplificación del primer modo, fb={fb:g} Hz ({frequency_source}) y ζ={damping:g}", "relacionar carga modal con desplazamiento",
+        "Sd multiplica Fλ y la escala P₀/kb; no se aplica a la aceleración como si ésta fuera una fuerza", frequency,
+        {"|Sd|": np.abs(sd)}, "Amplificación [1]",
+    ))
+    steps.append(spectrum_step(
+        "model_phase", "Fases de la excitación y de la respuesta",
+        "las fases de Fλ, Sd y Fλ·Sd", "conservar la posición temporal del paso y el desfase dinámico",
+        "el origen usado es el inicio del registro; las fases de magnitudes nulas no tienen interpretación", frequency,
+        {"Fase Fλ": np.angle(force_spectrum), "Fase Sd": np.angle(sd), "Fase Fλ·Sd": np.angle(force_spectrum * sd)}, "Fase [rad]",
+    ))
+    template = sensor_factor * force_spectrum * sd
+    direct = np.zeros_like(measured_a)
+    direct[1:] = -measured_a[1:] / omega[1:] ** 2
+    steps.append(spectrum_step(
+        "direct_displacement_spectrum", "Integración espectral medida",
+        "−A/ω² para frecuencias distintas de cero", "mostrar el desplazamiento medido antes de sustituir la banda baja",
+        "la referencia directa usa DC=0 sólo para poder dibujarla; el resultado híbrido recupera DC del modelo", frequency,
+        {"Integración medida": np.abs(direct)}, "Espectro [m·s]",
+    ))
+    band = (frequency >= f1) & (frequency <= f2)
+    if np.count_nonzero(band) < 5 or (f2 - f1) * (raw.size * dt) < 3.0:
+        raise ValueError("La banda de ajuste contiene información insuficiente: amplía el registro o revisa f₁ y f₂; el relleno no sustituye duración medida.")
+    threshold = max(float(np.max(np.abs(template[band]))) * max(floor, 1e-12), np.finfo(float).tiny)
+    valid = band & (np.abs(template) > threshold)
+    ratios = np.full_like(frequency, np.nan)
+    ratios[valid] = np.abs(direct[valid] / template[valid])
+    excluded = band & ~valid
+    steps.append(spectrum_step(
+        "fit_band", "Banda de identificación y ceros excluidos",
+        f"f₁={f1:.6g} Hz a f₂={f2:.6g} Hz, umbral relativo={floor:g}", "evitar dividir entre ceros de la excitación teórica",
+        "los puntos excluidos no aportan escala; la máscara es una salvaguarda numérica DESP", frequency[band],
+        {"|φ·Fλ·Sd|": np.abs(template[band]), "Umbral": np.full(np.count_nonzero(band), threshold),
+         "Excluidos": np.where(excluded[band], np.abs(template[band]), np.nan)}, "Espectro [s]",
+        {"Umbral": "dashed", "Excluidos": "points"},
+    ))
+    if np.count_nonzero(valid) < 5:
+        raise ValueError("No quedan suficientes frecuencias de ajuste fuera de los ceros del modelo; revisa geometría, banda y duración.")
+    scale = float(np.mean(ratios[valid]))
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError("No se puede identificar una escala positiva P₀/kb con la energía disponible en la banda.")
+    scale_cv = float(np.std(ratios[valid]) / scale)
+    steps.append(spectrum_step(
+        "identified_scale", "Escala identificada P₀/kb",
+        f"los cocientes por frecuencia y su promedio ({scale * 1000:.6g} mm)", "estimar la escala de la respuesta sin conocer peso y rigidez por separado",
+        "promedio de magnitudes de la ecuación 27 usando φ·Fλ·Sd en el sensor; la escala modal no es la flecha máxima ni una incertidumbre", frequency[band],
+        {"Cocientes válidos": ratios[band], "P₀/kb": np.full(np.count_nonzero(band), scale)}, "Desplazamiento [m]",
+        {"Cocientes válidos": "points", "P₀/kb": "dashed"},
+    ))
+    model = sign * scale * template
+    fit_norm = float(np.linalg.norm(direct[valid]))
+    fit_error = float(np.linalg.norm(direct[valid] - model[valid]) / max(fit_norm, np.finfo(float).tiny))
+    steps.append(spectrum_step(
+        "model_measurement_comparison", "Modelo ajustado e integración medida",
+        "ambos espectros completos después de identificar P₀/kb", "comparar el acuerdo en la banda y las diferencias fuera de ella",
+        f"error relativo complejo en banda={fit_error:.3g}; un ajuste visual de magnitudes no garantiza acuerdo de fase", frequency,
+        {"Medido": np.abs(direct), "Modelo ajustado": np.abs(model)}, "Espectro [m·s]", {"Modelo ajustado": "dashed"},
+    ))
+    steps.append(spectrum_step(
+        "fit_phase_comparison", "Comprobación de fase en la banda de ajuste",
+        "las fases medida y teórica en las frecuencias usadas para identificar la escala",
+        "comprobar la polaridad y el instante de entrada, que el ajuste de magnitudes no identifica",
+        "los saltos de ±π son angulares; los ceros excluidos no se representan", frequency[band],
+        {"Fase medida": np.where(valid[band], np.angle(direct[band]), np.nan),
+         "Fase modelo": np.where(valid[band], np.angle(model[band]), np.nan)}, "Fase [rad]",
+        {"Fase medida": "points", "Fase modelo": "dashed"},
+    ))
+    low = frequency < fm
+    steps.append(spectrum_step(
+        "replacement_masks", "Frontera de sustitución",
+        f"las máscaras complementarias a fm={fm:.6g} Hz", "mostrar qué parte procede del modelo y qué parte de la medición",
+        "el corte es abrupto como en la ecuación 28; no hay mezcla suave ni cancelación de ruido de la versión 2024", frequency,
+        {"Modelo: f < fm": low.astype(float), "Medición: f ≥ fm": (~low).astype(float)}, "Peso [1]",
+    ))
+    low_spectrum = np.where(low, model, 0.0)
+    high_spectrum = np.where(low, 0.0, direct)
+    combined = low_spectrum + high_spectrum
+    # A real inverse DFT has real DC/Nyquist. Odd n_fft has no Nyquist bin.
+    if n_fft % 2 == 0:
+        low_spectrum[-1] = low_spectrum[-1].real
+        high_spectrum[-1] = high_spectrum[-1].real
+        combined[-1] = combined[-1].real
+
+    def invert(spectrum: np.ndarray) -> np.ndarray:
+        return np.fft.irfft(spectrum / dt, n=n_fft)[:raw.size]
+
+    low_displacement = invert(low_spectrum)
+    high_displacement = invert(high_spectrum)
+    displacement = invert(combined)
+    velocity_spectrum = 1j * omega * combined
+    if n_fft % 2 == 0:
+        velocity_spectrum[-1] = 0.0
+    velocity = invert(velocity_spectrum)
+    corrected_acceleration = invert(-omega ** 2 * combined)
+    steps.append(spectrum_step(
+        "hybrid_displacement_spectrum", "Espectro híbrido de desplazamiento",
+        "los espectros de ambas contribuciones y su suma, incluida DC", "comprobar la sustitución antes de invertir",
+        "DC procede de la carga teórica; no se obliga a que la media o el residual de desplazamiento sean cero", frequency,
+        {"Teórico de baja frecuencia": np.abs(low_spectrum), "Medido conservado": np.abs(high_spectrum), "Híbrido": np.abs(combined)}, "Espectro [m·s]",
+    ))
+    steps.append(_step(
+        "displacement_components", "Contribuciones al desplazamiento",
+        _explanation("las contribuciones temporal teórica y medida", "hacer verificable que suman la respuesta final",
+                     "la componente de banda baja incluye Sd; no equivale exactamente a una solución estática", reference),
+        t, {"Teórica de baja frecuencia": low_displacement, "Medida conservada": high_displacement, "Suma": displacement},
+        "Desplazamiento [m]", {"Suma": "dashed"},
+    ))
+    steps.append(_step(
+        "corrected_acceleration", "Aceleración coherente con la reconstrucción",
+        _explanation("la segunda derivada espectral del desplazamiento y la entrada acondicionada",
+                     "mostrar qué aceleración resulta al reemplazar la banda baja", "en la banda conservada se mantiene la medición; la entrada original permanece en el primer paso", reference),
+        t, {"Entrada acondicionada": acceleration, "Reconstruida": corrected_acceleration}, "Aceleración [m/s²]",
+    ))
+    steps.append(_step(
+        "final_velocity", "Velocidad reconstruida",
+        _explanation("la inversa de iωD híbrido", "obtener una velocidad coherente con el mismo desplazamiento",
+                     "la derivada espectral no identifica una velocidad uniforme independiente de la aceleración", reference),
+        t, {"Velocidad": velocity}, "Velocidad [m/s]",
+    ))
+    steps.append(_step(
+        "final_displacement", "Desplazamiento reconstruido por Tokunaga",
+        _explanation("el desplazamiento híbrido frente a la integración espectral directa",
+                     "evaluar la flecha durante el paso completo", "las diferencias de baja frecuencia dependen del modelo; se requiere validación con desplazamiento independiente", reference),
+        t, {"Tokunaga": displacement, "Integración directa (DC=0)": invert(direct)}, "Desplazamiento [m]",
+        {"Integración directa (DC=0)": "dashed"},
+    ))
+    warnings: list[str] = []
+    if entry_mode == "automatic":
+        warnings.append(f"t₀={entry:.6g} s se estimó por energía (ayuda DESP). Revisa la entrada en la gráfica y la fase del ajuste; no es una detección garantizada del primer eje.")
+    if frequency_mode == "span_estimate":
+        warnings.append(f"fb={fb:.6g} Hz es una aproximación por luz (50·Lb^(-0.8), ecuación 33), usada en los casos numéricos de puentes ferroviarios de hormigón simplemente apoyados. Confírmala con vibración libre después del paso o introduce una frecuencia identificada.")
+    if tail.size < 16:
+        warnings.append("La señal posterior al paso es insuficiente para mostrar un espectro de diagnóstico modal; amplía el segmento para revisar fb.")
+    if not np.isclose(sensor_position, span / 2.0):
+        warnings.append("La respuesta se evalúa en el sensor mediante la forma del primer modo sin(πx/Lb). Fuera del centro puede aumentar la contribución de otros modos; no se convierte el resultado a flecha central.")
+    if sensor_factor < 0.1:
+        warnings.append("El sensor está cerca de un apoyo y tiene poca sensibilidad al primer modo; la escala modal es especialmente sensible al ruido.")
+    if fit_error > 0.5:
+        warnings.append("El modelo y la medición difieren en la banda de ajuste. Revisa polaridad, entrada, geometría y parámetros dinámicos; resultado exploratorio.")
+    if scale_cv > 0.5:
+        warnings.append("Los cocientes P₀/kb presentan alta dispersión: posible ruido, ceros espectrales o geometría inadecuada.")
+    if entry - t[0] < 1.0 / fb or t[-1] - exit_time < 3.0 / fb:
+        warnings.append("El registro deja poco margen antes o después del paso; comprueba los efectos de borde y el decaimiento posterior.")
+    if np.exp(-damping * wb * (n_fft * dt - (exit_time - t[0]))) > 0.01:
+        warnings.append("El decaimiento teórico puede alcanzar la siguiente copia periódica de la FFT; amplía el registro o revisa el relleno.")
+    if positions.size > 1 and np.count_nonzero(excluded) > np.count_nonzero(band) / 2:
+        warnings.append("Más de la mitad de la banda queda excluida por ceros de la excitación; la identificación tiene poco soporte espectral.")
+    return _result(record, "tokunaga_bridge", p, steps, corrected_acceleration, velocity, displacement, {
+        "unit_static_displacement_m": scale,
+        "signed_unit_static_displacement_m": sign * scale,
+        "fit_relative_error": fit_error,
+        "scale_coefficient_of_variation": scale_cv,
+        "fit_min_hz_used": f1, "fit_max_hz_used": f2, "replacement_hz_used": fm,
+        "fit_bin_count": int(np.count_nonzero(valid)), "excluded_fit_bin_count": int(np.count_nonzero(excluded)),
+        "spectral_model_floor_s": threshold,
+        "axle_positions_m": positions.tolist(), "axle_entry_times_s": axle_entries.tolist(),
+        "axle_spacings_m_used": np.diff(positions).tolist(), "axle_count": int(positions.size),
+        "train_geometry_mode": geometry_mode,
+        "sensor_position_m": sensor_position, "sensor_mode_factor": sensor_factor,
+        "entry_mode": entry_mode, "entry_time_s_used": float(entry),
+        "frequency_mode": frequency_mode, "natural_frequency_hz_used": fb,
+        "natural_frequency_source": frequency_source,
+        "post_train_sample_count": int(tail.size),
+        "train_exit_time_s": float(exit_time), "train_length_between_axles_m": float(positions[-1]),
+        "sampling_interval_s": dt, "fft_sample_count": n_fft,
+        "acceleration_mean_removed_mps2": mean_removed,
+        "theoretical_dc_m_s": float(combined[0].real),
+        "quality_warnings": warnings,
+        "source_formulation": "Tokunaga et al. 2022, equations 2, 3c, 16–19, 27–29 and 33; appendix for frequency guidance; not the 2024 noise-cancellation extension",
+        "numerical_extensions": "finite-bin average excluding model notches; optional mean removal and zero padding; real FFT endpoint handling",
+        "model_assumptions": "Vano simplemente apoyado; primer modo sin(πx/Lb) evaluado en el sensor vertical bajo una vía; ejes de igual carga y velocidad constante.",
+        "velocity_source": "spectral_derivative_of_hybrid_displacement",
+        "acceleration_source": "spectral_second_derivative_of_hybrid_displacement",
+    }, started)
+
+
 RUNNERS: dict[str, Callable[[SignalRecord, dict[str, Any]], MethodResult]] = {
     "trifunac_lee": _run_trifunac_lee,
     "chiu": _run_chiu,
@@ -1565,6 +2229,8 @@ RUNNERS: dict[str, Callable[[SignalRecord, dict[str, Any]], MethodResult]] = {
     "darragh": _run_darragh,
     "park": _run_park,
     "bunce_bridge": _run_bunce_bridge,
+    "tokunaga_bridge": _run_tokunaga_bridge,
+    "martinez_2024": _run_martinez_2024,
 }
 
 
@@ -1574,6 +2240,22 @@ def run_method(method_id: str, record: SignalRecord, parameters: dict[str, Any] 
     merged = default_parameters(method_id)
     if parameters:
         merged.update(parameters)
+        if method_id == "bunce_bridge" and "train_geometry_mode" not in parameters:
+            if any(key in parameters for key in ("train_length_m", "peak_midpoint_distances_m")):
+                merged["train_geometry_mode"] = "manual_midpoints"
+        elif method_id == "tokunaga_bridge":
+            legacy_regular = "train_geometry_mode" not in parameters and any(
+                key in parameters
+                for key in ("vehicle_count", "vehicle_length_m", "axle_spacing_m", "bogie_spacing_m")
+            )
+            if legacy_regular:
+                merged["train_geometry_mode"] = "regular_vehicles"
+                if "sensor_position_m" not in parameters and "bridge_span_m" in parameters:
+                    merged["sensor_position_m"] = float(parameters["bridge_span_m"]) / 2.0
+            if "entry_mode" not in parameters and "entry_time_s" in parameters:
+                merged["entry_mode"] = "manual"
+            if "frequency_mode" not in parameters and "natural_frequency_hz" in parameters:
+                merged["frequency_mode"] = "manual"
     return RUNNERS[method_id](record, merged)
 
 

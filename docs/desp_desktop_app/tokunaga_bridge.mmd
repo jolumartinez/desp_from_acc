@@ -1,0 +1,18 @@
+flowchart TD
+    A[Aceleración y segmento activos] --> A1[Media opcional y relleno FFT]
+    A1 --> B[Espectro de entrada]
+    C[Luz, sensor y separaciones entre ejes] --> D[Tiempos de cada eje y fuerza modal]
+    A --> T[Entrada por energía o manual]
+    T --> D
+    D --> E[Factores de repetición y espectro de fuerza]
+    F[Frecuencia por luz o manual y amortiguamiento] --> G[Transferencia y factor del sensor]
+    B --> H[Integración espectral medida]
+    E --> I[Ajuste de P0 sobre kb en banda válida]
+    G --> I
+    H --> I
+    I --> J[Comparar modelo y medición]
+    J --> K[Sustituir banda baja y conservar banda superior]
+    K --> L[Aportes de ambas bandas]
+    L --> M[Desplazamiento final]
+    M --> N[Velocidad y aceleración compatibles]
+    M --> O[Comparación e informe]

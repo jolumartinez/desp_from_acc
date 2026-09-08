@@ -178,6 +178,10 @@ class MainWindow(QMainWindow):
         self._close_when_idle = False
         self._rendered_method_id: str | None = None
         self._rendered_step_count = 0
+        self._pending_step_plots: dict[QWidget, ProcessStep] = {}
+        self._step_plot_timer = QTimer(self)
+        self._step_plot_timer.setSingleShot(True)
+        self._step_plot_timer.timeout.connect(self._render_current_step_plot)
 
         self.root = QWidget()
         self.root.setObjectName("AppRoot")
@@ -741,6 +745,7 @@ class MainWindow(QMainWindow):
         self.result_warning.hide()
         result_layout.addWidget(self.result_warning)
         self.result_stack = QStackedWidget()
+        self.result_stack.currentChanged.connect(lambda _index: self._step_plot_timer.start(0))
         result_layout.addWidget(self.result_stack, 1)
         splitter.addWidget(result_host)
         splitter.setStretchFactor(1, 1)
@@ -780,6 +785,9 @@ class MainWindow(QMainWindow):
             widget.setCurrentIndex(max(0, selected))
         elif spec.kind == "text":
             widget = QLineEdit(str(value))
+            if spec.key == "axle_spacings_m":
+                # Let the form wrap the field so all five preset gaps remain readable.
+                widget.setMinimumWidth(250)
         else:
             widget = QDoubleSpinBox()
             widget.setRange(float(spec.minimum if spec.minimum is not None else -1.0e12), float(spec.maximum if spec.maximum is not None else 1.0e12))
@@ -809,9 +817,15 @@ class MainWindow(QMainWindow):
                 f"(página {spec.thesis_pdf_page} del PDF)"
             )
             self.open_thesis_button.setText("Ver tesis local")
+        elif spec.reference_basis == "correo electrónico":
+            preset_text = "Propuesta del autor y configuración del prototipo · " + spec.thesis_pages
+            dependent_note = "El prototipo usa ζ = 0.002 (0.2%); el correo describe ζ = 0.035 (3.5%). El valor es editable."
+            self.open_thesis_button.setText("Ver correo local")
         else:
             preset_text = f"Configuración base de la {spec.reference_basis} · {spec.thesis_pages}"
             self.open_thesis_button.setText("Ver publicación local")
+        self.open_thesis_button.setVisible(spec.reference_basis == "tesis" or bool(spec.local_reference_file))
+        self.open_reference_button.setVisible(bool(spec.reference_url))
         self.method_preset.setText(preset_text + (f"\n{dependent_note}" if dependent_note else ""))
         self.flow_widget.set_flow(spec.flow, spec.accent)
         self.method_use.setText(f"Uso: {spec.intended_use}\n\nLímite: {spec.limitation}\n\nReferencia: {spec.reference}")
@@ -866,6 +880,26 @@ class MainWindow(QMainWindow):
         if isinstance(fit_widget, QComboBox):
             self._set_parameter_visible("breakpoint_s", fit_widget.currentData() in {"auto", "bilinear"})
 
+        band_mode_widget = self.parameter_widgets.get("band_mode")
+        if isinstance(band_mode_widget, QComboBox):
+            manual_band = band_mode_widget.currentData() == "manual"
+            for key in ("fit_min_hz", "fit_max_hz", "replacement_hz"):
+                self._set_parameter_visible(key, manual_band)
+
+        entry_mode_widget = self.parameter_widgets.get("entry_mode")
+        if isinstance(entry_mode_widget, QComboBox):
+            self._set_parameter_visible("entry_time_s", entry_mode_widget.currentData() == "manual")
+
+        frequency_mode_widget = self.parameter_widgets.get("frequency_mode")
+        if isinstance(frequency_mode_widget, QComboBox):
+            self._set_parameter_visible("natural_frequency_hz", frequency_mode_widget.currentData() == "manual")
+
+        geometry_widget = self.parameter_widgets.get("train_geometry_mode")
+        if isinstance(geometry_widget, QComboBox):
+            self._set_parameter_visible("axle_spacings_m", geometry_widget.currentData() == "axle_spacings")
+            for key in ("vehicle_count", "vehicle_length_m", "axle_spacing_m", "bogie_spacing_m"):
+                self._set_parameter_visible(key, geometry_widget.currentData() == "regular_vehicles")
+
         step_mode_widget = self.parameter_widgets.get("step_search_mode")
         if isinstance(step_mode_widget, QComboBox):
             manual_range = step_mode_widget.currentData() == "manual_range"
@@ -898,11 +932,14 @@ class MainWindow(QMainWindow):
             for key in (
                 "bridge_span_m",
                 "sensor_position_m",
-                "train_length_m",
-                "peak_midpoint_distances_m",
+                "train_geometry_mode",
                 "train_timing_basis",
             ):
                 self._set_parameter_visible(key, geometry_source)
+            axle_geometry = isinstance(geometry_widget, QComboBox) and geometry_widget.currentData() == "axle_spacings"
+            self._set_parameter_visible("axle_spacings_m", geometry_source and axle_geometry)
+            for key in ("train_length_m", "peak_midpoint_distances_m"):
+                self._set_parameter_visible(key, geometry_source and not axle_geometry)
             manual_source = train_quality and not geometry_source
             self._set_parameter_visible("expected_peak_offsets_s", manual_source)
             timing_widget = self.parameter_widgets.get("train_timing_basis")
@@ -920,7 +957,7 @@ class MainWindow(QMainWindow):
         self._show_method(self.current_method_id)
         self._refresh_comparison()
         self._refresh_report_methods()
-        self.status_message.setText("Preajuste de la tesis restaurado; ejecuta nuevamente el método")
+        self.status_message.setText("Configuración de referencia restaurada; ejecuta nuevamente el método")
 
     def _capture_parameters(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
@@ -937,6 +974,8 @@ class MainWindow(QMainWindow):
 
     def _open_local_thesis(self) -> None:
         spec = METHOD_BY_ID[self.current_method_id]
+        if not spec.local_reference_file and spec.reference_basis != "tesis":
+            return
         document = resource_dir() / (spec.local_reference_file or "TESIS_DAMARIS_ARIAS_final.pdf")
         page = spec.local_reference_page or spec.thesis_pdf_page
         if not document.exists():
@@ -965,8 +1004,11 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(url)
 
     def _open_method_reference(self) -> None:
-        reference_url = METHOD_BY_ID[self.current_method_id].reference_url
-        QDesktopServices.openUrl(QUrl(reference_url))
+        spec = METHOD_BY_ID[self.current_method_id]
+        if spec.reference_url:
+            QDesktopServices.openUrl(QUrl(spec.reference_url))
+        elif spec.local_reference_file or spec.reference_basis == "tesis":
+            self._open_local_thesis()
 
     def _run_current_method(self) -> None:
         self.method_parameters[self.current_method_id] = self._capture_parameters()
@@ -1109,6 +1151,8 @@ class MainWindow(QMainWindow):
         self._finish_deferred_close()
 
     def _clear_result_steps(self, message: str) -> None:
+        self._step_plot_timer.stop()
+        self._pending_step_plots.clear()
         self._rendered_method_id = None
         self._rendered_step_count = 0
         self.result_warning.clear()
@@ -1136,6 +1180,16 @@ class MainWindow(QMainWindow):
         caption.setObjectName("PageLead")
         caption.setWordWrap(True)
         container_layout.addWidget(caption)
+        self._pending_step_plots[container] = step
+        self.result_stack.addWidget(container)
+        self.step_selector.addItem(f"{index}. {step.title}")
+
+    def _render_current_step_plot(self) -> None:
+        """Create a canvas only when its step is viewed, coalescing live updates."""
+        container = self.result_stack.currentWidget()
+        step = self._pending_step_plots.pop(container, None)
+        if step is None:
+            return
         panel = PlotPanel()
         panel.set_plot(
             step.x,
@@ -1145,9 +1199,7 @@ class MainWindow(QMainWindow):
             y_label=step.y_label,
             series_styles=step.series_styles,
         )
-        container_layout.addWidget(panel, 1)
-        self.result_stack.addWidget(container)
-        self.step_selector.addItem(f"{index}. {step.title}")
+        container.layout().addWidget(panel, 1)
 
     def _render_method_result(self, method_id: str) -> None:
         result = self.results.get(method_id)
@@ -1186,6 +1238,8 @@ class MainWindow(QMainWindow):
             return
         self.step_selector.blockSignals(True)
         self.step_selector.clear()
+        self._step_plot_timer.stop()
+        self._pending_step_plots.clear()
         while self.result_stack.count():
             widget = self.result_stack.widget(0)
             self.result_stack.removeWidget(widget)

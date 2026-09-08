@@ -32,6 +32,14 @@ Un valor bajo de `J` significa hombros más planos y, en modo ferroviario, picos
 intermedios más consistentes. Es un indicador de clasificación, no una medida
 formal de incertidumbre.
 
+La configuración inicial activa el control de tren con velocidad conocida y
+seis ejes separados por `17.4, 17.75, 17.75, 17.75, 17.4 m`. Hay que introducir
+la luz, la velocidad y la posición del sensor desde el apoyo de entrada. Los
+cinco puntos medios se calculan con esa lista; sirven para prever recuperaciones,
+sin imponer que el desplazamiento tenga cinco picos. La
+[guía de configuración](08_metodo_bunce_y_seleccion_tecnica.md#insumos-del-método-bunce)
+detalla las posiciones y los modos alternativos de geometría manual y hombros.
+
 ## Flujo calculado y observado
 
 ```mermaid
@@ -111,8 +119,9 @@ bit con `MATLAB findpeaks` sin los datos originales.
 2. Confirmar manualmente entrada y salida del tren.
 3. Revisar que las zonas de búsqueda sólo contengan puente descargado.
 4. Confirmar polaridad y umbral de levantamiento con el montaje real.
-5. En modo tren, comprobar `B`, posición del sensor, longitud entre ejes extremos
-   y puntos medios `m_i`.
+5. En modo tren, comprobar `B`, posición del sensor, velocidad y lista de
+   separaciones; revisar la longitud y los puntos medios `m_i` derivados, o los
+   campos manuales si se eligió esa alternativa.
 6. Examinar el indicador y la estabilidad de las cinco mejores ventanas.
 7. Inspeccionar tendencia, velocidad y hombros antes de aceptar la flecha.
 8. Contrastar picos ferroviarios y ejecutar sensibilidad de límites.

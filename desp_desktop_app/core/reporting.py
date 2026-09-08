@@ -144,6 +144,11 @@ def build_report_html(
     method_sections: list[str] = []
     for result in items:
         spec = METHOD_BY_ID[result.method_id]
+        reference_html = html.escape(spec.reference)
+        if spec.reference_url:
+            reference_html = f'<a href="{html.escape(spec.reference_url)}">{reference_html}</a>'
+        elif spec.local_reference_file:
+            reference_html += f" Documento local: <code>{html.escape(spec.local_reference_file)}</code>."
         parameter_rows = "".join(
             f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>"
             for key, value in result.parameters.items()
@@ -178,7 +183,7 @@ def build_report_html(
               {warning_html}
               <p><strong>Uso recomendado:</strong> {html.escape(spec.intended_use)}</p>
               <p><strong>Limitación:</strong> {html.escape(spec.limitation)}</p>
-              <p class="reference"><strong>Referencia:</strong> <a href="{html.escape(spec.reference_url)}">{html.escape(spec.reference)}</a> {html.escape(spec.thesis_pages)}</p>
+              <p class="reference"><strong>Referencia:</strong> {reference_html} {html.escape(spec.thesis_pages)}</p>
               <div class="two-col"><div><h3>Configuración</h3><table>{parameter_rows}</table></div><div><h3>Resultado</h3><table>{diagnostic_rows}</table></div></div>
               {charts}
             </section>
@@ -221,7 +226,17 @@ def export_result_bundle(output_dir: Path, record: SignalRecord, results: Iterab
         "sample_count": int(record.time_s.size),
         "signal_metadata": _json_ready(record.metadata),
         "results": [
-            {"summary": _json_ready(result.summary()), "parameters": _json_ready(result.parameters)}
+            {
+                "summary": _json_ready(result.summary()),
+                "parameters": _json_ready(result.parameters),
+                "reference": {
+                    "citation": METHOD_BY_ID[result.method_id].reference,
+                    "basis": METHOD_BY_ID[result.method_id].reference_basis,
+                    "url": METHOD_BY_ID[result.method_id].reference_url,
+                    "local_file": METHOD_BY_ID[result.method_id].local_reference_file,
+                    "local_page": METHOD_BY_ID[result.method_id].local_reference_page,
+                },
+            }
             for result in items
         ],
     }
@@ -346,7 +361,8 @@ def write_pdf_report(
             method_cover.text(0.08, configuration_title_y, "Configuración", color="#008BAC", fontsize=12, weight="bold")
             configuration = "\n".join(f"{key}: {value}" for key, value in result.parameters.items())
             method_cover.text(0.08, configuration_text_y, configuration, color="#323E48", fontsize=8, linespacing=1.35)
-            reference = f"Referencia: {spec.reference}\n{spec.reference_url}\n{spec.thesis_pages}"
+            reference_location = spec.reference_url or spec.local_reference_file or ""
+            reference = f"Referencia: {spec.reference}\n{reference_location}\n{spec.thesis_pages}"
             method_cover.text(0.08, 0.18, "\n".join(textwrap.wrap(reference, 100)), color="#54565B", fontsize=8)
             pdf.savefig(method_cover, bbox_inches="tight")
 

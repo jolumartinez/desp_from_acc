@@ -23,6 +23,7 @@ class MethodEngineTests(unittest.TestCase):
     def test_every_catalog_method_produces_complete_finite_series(self) -> None:
         record, _ = harmonic_record()
         for spec in METHOD_SPECS:
+            method_record = record
             overrides = None
             if spec.method_id == "wang":
                 overrides = {"grid_points": 4, "pre_event_s": 2.0}
@@ -36,9 +37,14 @@ class MethodEngineTests(unittest.TestCase):
                     "quality_mode": "shoulders",
                     "max_lift_mm": 1000.0,
                 }
+            elif spec.method_id == "tokunaga_bridge":
+                from desp_desktop_app.tests.test_tokunaga import bridge_parameters, moving_train_record
+
+                method_record, _, _ = moving_train_record()
+                overrides = bridge_parameters()
             with self.subTest(method=spec.method_id):
-                result = run_method(spec.method_id, record, overrides)
-                self.assertEqual(result.displacement_m.shape, record.time_s.shape)
+                result = run_method(spec.method_id, method_record, overrides)
+                self.assertEqual(result.displacement_m.shape, method_record.time_s.shape)
                 self.assertTrue(np.all(np.isfinite(result.displacement_m)))
                 self.assertGreaterEqual(len(result.steps), 6)
                 self.assertEqual(result.steps[-1].key, "final_displacement")
@@ -212,6 +218,8 @@ class MethodEngineTests(unittest.TestCase):
             [4.0, 14.0 / 3.0, 16.0 / 3.0],
         )
         self.assertEqual(result.diagnostics["train_peak_source"], "geometry")
+        self.assertEqual(result.parameters["train_geometry_mode"], "manual_midpoints")
+        self.assertEqual(result.diagnostics["train_geometry_mode"], "manual_midpoints")
         self.assertAlmostEqual(result.diagnostics["train_effective_speed_kmh"], 54.0)
         self.assertTrue(result.diagnostics["specific_train_check"])
         self.assertIn("expected_train_peaks", [step.key for step in result.steps])

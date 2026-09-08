@@ -17,7 +17,7 @@ flowchart LR
     X --> A[SignalRecord activo con t=0]
     A --> Q[QThread supervisor]
     Q --> E[Proceso de cálculo descartable]
-    E --> N[Motor de ocho métodos / NumPy + SciPy]
+    E --> N[Motor de diez métodos / NumPy + SciPy]
     E -->|etapas por cola| Q
     E --> R[Resultados tipados]
     R --> V[Matplotlib embebido]
@@ -39,7 +39,7 @@ El mismo diagrama se conserva como fuente Mermaid en `architecture.mmd`.
 | Modelo | `core/models.py` | Contratos `SignalRecord`, `ProcessStep`, `MethodResult` y `PartialMethodResult` |
 | Señal | `core/signal_ops.py` | Integración, filtros, tendencias, derivadas y FFT |
 | Catálogo | `core/catalog.py` | Parámetros, referencias, límites y flujos de cada método |
-| Cálculo | `core/engine.py` | Siete algoritmos de tesis y un flujo específico para puentes/trenes |
+| Cálculo | `core/engine.py` | Siete algoritmos de tesis, Bunce para puentes/trenes, superposición modal JM y reconstrucción ferroviaria TK |
 | Comparación | `core/analysis.py` | Consenso mediano, correlación, NRMSE y envolventes |
 | Informes | `core/reporting.py` | HTML offline, PDF, CSV y JSON |
 | Ejecución | `core/execution.py` | Proceso aislado, cola de etapas, cancelación y tiempo límite |
@@ -57,7 +57,7 @@ flowchart TD
     X -->|No| Y[Seleccionar y aplicar intervalo]
     X -->|Sí| F[Configurar métodos]
     Y --> F
-    F --> G[Ejecutar uno u ocho métodos]
+    F --> G[Ejecutar uno o varios de los diez métodos]
     G --> V{¿Terminó el método?}
     V -- Sí --> K[Recorrer etapas con selector y anterior/siguiente]
     V -- No --> P[Conservar etapas alcanzadas como ejecución parcial]
@@ -112,6 +112,10 @@ el cierre del proceso hijo, evitando dejar procesos huérfanos.
 - Plotly se incrusta completo dentro de cada HTML; el informe no referencia un
   CDN.
 - La tesis permanece local y se puede abrir desde la ficha del método.
+- JM incorpora el correo PDF como referencia local; ejecuta el cálculo con NumPy
+  y SciPy dentro del mismo proceso aislado, sin cargar la aplicación Dash original.
+- TK construye su modelo analítico con los parámetros de puente y tren de su
+  ficha; no requiere importar un FEM ni acceder a servicios externos.
 - Los enlaces a publicaciones son opcionales y no intervienen en el cálculo.
 
 ## Identidad visual

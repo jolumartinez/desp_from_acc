@@ -88,8 +88,10 @@ columna y archivos numéricos sin encabezado con al menos dos columnas.
 
 - **Datos:** inspección temporal y espectral, zoom/paneo y recorte no destructivo
   del canal seleccionado.
-- **Métodos:** siete procedimientos de la tesis y el método Bunce para puentes y
-  trenes, cada uno con configuración, diagrama, referencia, etapas gráficas y
+- **Métodos:** siete procedimientos de la tesis, Bunce para puentes y trenes,
+  la superposición modal de Jorge Luis Martínez Valencia (JM) y Tokunaga et al.
+  (TK, 2022), cada uno con
+  configuración, diagrama, referencia, etapas gráficas y
   ejecución independiente. Las etapas se recorren con un selector y controles
   anterior/siguiente.
 - **Comparar:** superposición, envolvente, correlación y métricas en una escala
@@ -100,6 +102,33 @@ columna y archivos numéricos sin encabezado con al menos dos columnas.
 Las gráficas Qt incorporan la barra nativa de Matplotlib para zoom, paneo,
 restablecimiento y exportación. Las historias temporales también pueden
 reproducirse progresivamente.
+
+JM conserva los valores de la última gráfica de `easy_ama_jmpc`: hasta 20 picos
+de la PSD, amortiguamiento de 0.2 %, Welch de 512 muestras y umbral de 0.1 % de
+la altura máxima. El correo propone 3.5 % como amortiguamiento general; ese valor
+se puede introducir en la configuración para contrastarlo. La
+[guía del método](../docs/desp_desktop_app/13_metodo_jorge_martinez_2024.md)
+explica esta diferencia, la superposición y sus límites.
+
+BU y TK parten de seis ejes separados por
+`17.4, 17.75, 17.75, 17.75, 17.4 m`, con `88.05 m` entre el primero y el último.
+La lista se puede editar. En ambos hay que introducir la **luz, la velocidad y
+la posición del sensor** desde el apoyo de entrada. BU inicia con el control
+ferroviario y convierte los puntos medios entre ejes en tiempos de recuperación
+usando la velocidad; conserva la geometría manual y el control por hombros.
+
+TK reconstruye la parte de baja frecuencia con un modelo analítico de viga
+simplemente apoyada y conserva la integración medida en la banda superior. La
+flecha corresponde al punto del sensor, con factor de primer modo `sin(πx/Lb)`.
+Propone la entrada por energía y la frecuencia mediante `fb = 50 Lb^(-0.8) Hz`;
+ambas son aproximaciones revisables y tienen opción manual. Para identificar
+mejor `fb`, se puede examinar la vibración libre posterior a la salida del tren.
+El amortiguamiento inicial es 2 %. No necesita un FEM previo.
+Implementa la formulación de **2022**, con referencia complementaria de
+2023; la cancelación de ruido añadida en la publicación de 2024 no está incluida.
+La [guía de TK](../docs/desp_desktop_app/14_metodo_tokunaga.md) distingue la
+formulación original, las estimaciones iniciales, los controles manuales y las
+precauciones numéricas.
 
 Para mantener fluidas las señales extensas, las gráficas dibujan como máximo
 20 000 puntos uniformemente distribuidos. Esta reducción es exclusivamente
@@ -128,5 +157,5 @@ MPLCONFIGDIR=/tmp/desp-mpl .venv/bin/python -m unittest discover -s desp_desktop
 La documentación técnica completa está en
 [`docs/desp_desktop_app`](../docs/desp_desktop_app/README.md).
 
-Las publicaciones abiertas que pueden acompañar legalmente una distribución
-offline están inventariadas en [`references`](references/README.md).
+Las publicaciones y el correo aportado como referencia local están inventariados
+en [`references`](references/README.md), con sus respectivas condiciones.
