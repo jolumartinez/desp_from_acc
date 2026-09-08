@@ -1,0 +1,8 @@
+PyQt5==5.15.10
+PyQt5-Qt5==5.15.2; sys_platform != "darwin"
+PyQt5-sip==12.15.0
+numpy==2.4.4
+pandas==3.0.2
+scipy==1.17.1
+matplotlib==3.10.8
+plotly==6.6.0

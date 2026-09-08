@@ -1,0 +1,21 @@
+flowchart LR
+    U[Usuario] --> QT[Interfaz PyQt5]
+    QT --> IO[Lector TXT / Pandas]
+    IO --> S[SignalRecord completo en SI]
+    S --> X[Recorte temporal opcional]
+    X --> A[SignalRecord activo con t=0]
+    A --> Q[QThread supervisor]
+    Q --> E[Proceso hijo descartable]
+    E --> N[Motor de métodos / NumPy + SciPy]
+    E -->|etapas por cola| Q
+    E --> R[MethodResult]
+    E --> PR[PartialMethodResult]
+    Q -->|cancelación o timeout| E
+    R --> V[Matplotlib embebido]
+    PR --> V
+    R --> C[Comparación]
+    C --> H[HTML + Plotly local]
+    R --> P[PDF + CSV + JSON]
+    D[(Archivos locales)] --> IO
+    H --> D
+    P --> D

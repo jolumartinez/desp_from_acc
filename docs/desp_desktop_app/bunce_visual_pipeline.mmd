@@ -1,0 +1,20 @@
+flowchart TD
+    A[Aceleración sin filtrar] --> B[Entrada y salida de la carga]
+    B --> C[Zonas de posibles inicios y finales]
+    C --> D[Producto cartesiano de ventanas]
+    D --> E[Ajuste lineal independiente]
+    E --> F[Aceleración corregida]
+    F --> G[Primera integración: velocidad]
+    G --> H[Segunda integración: desplazamiento]
+    H --> I{Levantamiento admisible}
+    I -->|Sí| J[Calcular q_pre y q_post]
+    I -->|No| X[Excluir o marcar como exploratoria]
+    J --> K{Modo tren}
+    K -->|Sí| L[Calcular P_i previstos]
+    L --> L2[Detectar recuperaciones reales]
+    L2 --> L3[Asociar P_i sin reutilizar máximos]
+    K -->|No| M[Calcular J]
+    L3 --> M
+    M --> N[Ordenar candidatos]
+    N --> O[Comparar mejores ventanas]
+    O --> P[Seleccionar desplazamiento final]

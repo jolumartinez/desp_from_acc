@@ -1,0 +1,9 @@
+{
+  "name": "synthetic_residual",
+  "description": "Transici\u00f3n cosenoidal suave hacia un desplazamiento permanente de 40 mm.",
+  "sampling_rate_hz": 100.00000000000213,
+  "samples": 3000,
+  "acceleration_unit": "m/s2",
+  "truth_displacement_unit": "m",
+  "generated": true
+}

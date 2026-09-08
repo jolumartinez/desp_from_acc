@@ -1,0 +1,9 @@
+{
+  "name": "synthetic_harmonic",
+  "description": "Movimiento arm\u00f3nico de 1.5 Hz entre ventanas en reposo de 5 s; desplazamiento final cero.",
+  "sampling_rate_hz": 100.00000000000213,
+  "samples": 4000,
+  "acceleration_unit": "m/s2",
+  "truth_displacement_unit": "m",
+  "generated": true
+}

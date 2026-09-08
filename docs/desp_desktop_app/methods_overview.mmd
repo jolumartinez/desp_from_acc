@@ -1,0 +1,9 @@
+flowchart TB
+    TL[Aceleración --> PB --> PA --> Int V --> PA --> Int D --> PA]
+    CH[Aceleración --> Tendencia --> PA --> Int --> Corregir deriva --> Int]
+    CB[Aceleración --> Línea base --> Pads --> PB --> PA --> Doble integración]
+    BO[Preevento --> Int V --> Ajuste restringido --> Derivar --> PA opcional --> Integrar]
+    WA[Arribo y energía --> Int --> Ajuste postevento --> Buscar vc --> Escalón --> Integrar]
+    DA[Int V --> Lineal/cuadrático/bilineal --> Derivar --> PB --> Integrar]
+    PA[Restar media a --> Int V --> Restar media v --> Int D]
+    BU[Entrada/salida --> Ventanas --> Detrend lineal --> Int V/D --> QC hombros/picos --> Ranking]

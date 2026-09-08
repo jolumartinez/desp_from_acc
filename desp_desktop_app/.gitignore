@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.cache/
+outputs/
+validation_data/external/*
+!validation_data/external/.gitignore
+!validation_data/external/README.md
