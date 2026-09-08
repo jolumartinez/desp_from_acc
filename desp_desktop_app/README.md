@@ -19,21 +19,39 @@ En Linux, macOS o Git Bash/MSYS2:
 ./launch_desp_desktop_app.sh
 ```
 
+Instala Python 3.12 con soporte para `venv` y `pip` antes del primer lanzamiento.
+Los lanzadores buscan primero Python 3.12 y aceptan versiones posteriores si
+no está disponible. En Windows se busca mediante `py` y después en `PATH`;
+en Linux/macOS, mediante `python3.12`, `python3` o `python` en `PATH`.
+
+Con un solo comando, el lanzador:
+
+1. Crea `.venv` en la raíz del repositorio si todavía no existe.
+2. Comprueba las dependencias con `pip install -r desp_desktop_app/requirements.txt`,
+   instalando las que falten o tengan una versión distinta de la indicada.
+3. Abre DESP Studio con el Python de ese entorno.
+
+La primera instalación necesita acceso al índice de paquetes configurado o una
+caché local que contenga las dependencias. En los siguientes arranques, `pip`
+reutiliza los paquetes que ya cumplen los requisitos; no se fuerza su
+actualización ni reinstalación. Si falta una dependencia o cambia
+`requirements.txt`, se comprueba e instala de nuevo lo necesario antes de abrir
+la aplicación. Si la instalación falla, el lanzador se detiene y muestra el
+error; puedes volver a ejecutarlo después de resolver la causa.
+
 Los lanzadores utilizan `.venv\Scripts\python.exe` en Windows y
 `.venv/bin/python` en Linux/macOS, y crean una caché local de Matplotlib. No
 levantan contenedores, base de datos, API ni servicio de red. La comprobación de
-`DISPLAY`/`WAYLAND_DISPLAY` sólo se aplica a Linux.
+`DISPLAY`/`WAYLAND_DISPLAY` sólo se aplica a Linux: ejecútalo desde una sesión
+gráfica. Las rutas se resuelven respecto al lanzador, por lo que también puedes
+invocarlo desde otra carpeta.
 
-El entorno debe tener instaladas las dependencias. En Windows:
-
-```powershell
-# Sólo si todavía no existe .venv:
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r desp_desktop_app\requirements.txt
-```
-
-Si aparece `ModuleNotFoundError: No module named 'pandas'`, faltan dependencias
-en ese entorno; ejecuta el comando de instalación anterior.
+Si `.venv` ya existe pero está incompleto, no es un entorno virtual o usa Python
+anterior a 3.12, el lanzador pide revisarlo o renombrarlo, sin borrarlo ni
+reemplazarlo automáticamente. En Debian/Ubuntu, un error de creación relacionado
+con `venv` o `ensurepip` puede requerir instalar el paquete `python3-venv`
+correspondiente al intérprete elegido. El lanzador no instala Python ni paquetes
+del sistema. `.venv` se prepara en cada equipo y no se guarda en Git.
 
 Para ejecutar el módulo directamente en Linux/macOS:
 
@@ -92,6 +110,15 @@ completo como contexto, el segmento activo se realza y los resultados e informes
 registran sus límites originales.
 
 ## Validación
+
+Las pruebas del lanzador Bash simulan Python, la instalación y la aplicación;
+se pueden ejecutar sin preparar `.venv`, descargar paquetes ni abrir la GUI:
+
+```bash
+python3 -m unittest desp_desktop_app.tests.test_launchers -v
+```
+
+Para validar los métodos de análisis con las dependencias instaladas:
 
 ```bash
 .venv/bin/python desp_desktop_app/tools/generate_validation_data.py
