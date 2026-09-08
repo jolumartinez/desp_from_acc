@@ -5,6 +5,9 @@ fuentes y el correo personal aportado por su autor como referencia del método
 JM. Los algoritmos siguen necesitando validación independiente antes de un uso
 metrológico.
 
+Los [avisos de terceros](../../THIRD_PARTY_NOTICES.md) reúnen las atribuciones,
+las condiciones conocidas y los permisos de redistribución pública pendientes.
+
 | Archivo | Uso | Licencia o condición |
 | --- | --- | --- |
 | `bunce_bridge_displacement_2023.pdf` | Método implementado para puentes y trenes | Artículo abierto CC BY 4.0; conservar atribución |

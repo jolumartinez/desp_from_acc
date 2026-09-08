@@ -159,3 +159,10 @@ La documentación técnica completa está en
 
 Las publicaciones y el correo aportado como referencia local están inventariados
 en [`references`](references/README.md), con sus respectivas condiciones.
+
+## Licencia y alcance
+
+El código original se distribuye bajo [GPLv3](../LICENSE). Consulta el
+[alcance y responsabilidad](../README.md#alcance-y-responsabilidad) y las
+[atribuciones de terceros](../THIRD_PARTY_NOTICES.md) antes de utilizar o
+redistribuir el proyecto.
