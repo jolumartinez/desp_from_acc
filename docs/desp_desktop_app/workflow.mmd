@@ -15,6 +15,8 @@ flowchart TD
     F --> DA[DA]
     F --> PA[PA]
     F --> BU[BU]
+    F --> JM[JM]
+    F --> TK[TK]
     TL --> G[Resultados por etapa]
     CH --> G
     CB --> G
@@ -23,6 +25,8 @@ flowchart TD
     DA --> G
     PA --> G
     BU --> G
+    JM --> G
+    TK --> G
     G --> V{¿resultado completo?}
     V -- Sí --> N[Selector de etapa y anterior/siguiente]
     V -- No --> P[Mostrar etapas alcanzadas y advertencia]

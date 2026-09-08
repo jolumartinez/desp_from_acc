@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import MethodSpec, ParameterSpec
+from .train_geometry import DEFAULT_AXLE_SPACINGS_M
 
 
 def number(
@@ -75,6 +76,13 @@ FILTER_PHASE = choice(
     "zero_phase",
     (("Sin desfase · filtfilt (tesis)", "zero_phase"), ("Causal · una pasada", "causal")),
     help_text="El preajuste reproduce filtfilt, tal como aparece en los scripts de la tesis.",
+)
+
+AXLE_SPACINGS = text(
+    "axle_spacings_m",
+    "Separaciones entre ejes consecutivos",
+    DEFAULT_AXLE_SPACINGS_M,
+    help_text="Metros entre ejes consecutivos, separados por coma. El preajuste representa seis ejes y 88.05 m entre el primero y el último; las cinco distancias son editables.",
 )
 
 
@@ -364,7 +372,7 @@ METHOD_SPECS: tuple[MethodSpec, ...] = (
             choice(
                 "quality_mode",
                 "Control de calidad",
-                "shoulders",
+                "train",
                 (("Tren: hombros y recuperaciones", "train"), ("Carga móvil: hombros", "shoulders")),
                 help_text="El control por hombros sólo requiere la señal. El control de tren añade las recuperaciones interiores P_i entre valles de carga T_i.",
             ),
@@ -395,10 +403,18 @@ METHOD_SPECS: tuple[MethodSpec, ...] = (
                 suffix=" m",
                 help_text="Posición longitudinal del acelerómetro medida desde el apoyo por el que entra el tren; en centro de vano vale B/2.",
             ),
+            choice(
+                "train_geometry_mode",
+                "Geometría del tren",
+                "axle_spacings",
+                (("Separaciones entre ejes", "axle_spacings"), ("Longitud y puntos medios manuales", "manual_midpoints")),
+                help_text="Las separaciones calculan la longitud del tren y los puntos medios entre ejes para prever las recuperaciones. La opción manual conserva la entrada de longitud y puntos medios independientes.",
+            ),
+            AXLE_SPACINGS,
             number(
                 "train_length_m",
                 "Longitud entre ejes extremos",
-                0.0,
+                88.05,
                 0.0,
                 100000.0,
                 decimals=3,
@@ -408,13 +424,13 @@ METHOD_SPECS: tuple[MethodSpec, ...] = (
             text(
                 "peak_midpoint_distances_m",
                 "Huecos: puntos medios m_i",
-                "",
+                "8.7, 26.275, 44.025, 61.775, 79.35",
                 help_text="Metros desde el primer eje, separados por coma. Cada m_i representa una recuperación P_i entre dos valles de carga; seis conjuntos suelen producir cinco m_i.",
             ),
             choice(
                 "train_timing_basis",
                 "Base temporal",
-                "event_duration",
+                "speed",
                 (("Duración observada T (publicación)", "event_duration"), ("Velocidad aproximada", "speed")),
                 help_text="La duración observada usa entrada y salida; la velocidad permite calcular cada tiempo como d_i/v.",
             ),
@@ -484,6 +500,96 @@ METHOD_SPECS: tuple[MethodSpec, ...] = (
         "#007F73",
         local_reference_file="references/bunce_bridge_displacement_2023.pdf",
         local_reference_page=5,
+        reference_basis="publicación",
+    ),
+    MethodSpec(
+        "martinez_2024",
+        "JM",
+        "Jorge Martínez · Superposición modal",
+        2024,
+        "Selecciona picos de la PSD de Welch y suma sus respuestas en frecuencia mediante una transferencia modal amortiguada.",
+        "Exploración del desplazamiento dinámico de puentes y otras estructuras, siguiendo la propuesta y el prototipo del autor.",
+        "Los picos se asumen modos sin identificar formas ni participaciones modales. La amplitud depende del amortiguamiento; requiere contraste con desplazamientos medidos y no garantiza media cero ni recupera por sí solo el desplazamiento permanente.",
+        "Jorge Luis Martínez Valencia, propuesta de cálculo del desplazamiento por superposición modal, correo electrónico de noviembre de 2024 aportado por el autor.",
+        "",
+        "Correo, pp. 1-5",
+        1,
+        "1",
+        (
+            "Aceleración y FFT",
+            "PSD de Welch",
+            "Detectar picos",
+            "Seleccionar modos",
+            "Transferencia modal",
+            "Aportes y superposición",
+            "Transformada inversa",
+        ),
+        (
+            integer(
+                "num_modes", "Máximo de modos", 20, 1, 200,
+                help_text="Se seleccionan los picos de mayor altura en la PSD. El prototipo usa 20; el correo describe ensayos con 20, 50, 100 y 200. Cada modo conserva su gráfica de aporte.",
+            ),
+            number(
+                "damping_ratio", "Amortiguamiento ζ (fracción)", 0.002, 0.000001, 1.0,
+                decimals=6,
+                help_text="Fracción adimensional común a todos los modos. El prototipo usa 0.002 = 0.2%; el correo propone 0.035 = 3.5% en general y menciona 0.02 = 2% para su caso particular.",
+            ),
+            integer(
+                "welch_nperseg", "Muestras por ventana Welch", 512, 4, 65536,
+                help_text="El prototipo usa 512 muestras. Si el segmento es más corto, se usa su longitud. La resolución de la PSD condiciona los picos detectados.",
+            ),
+            number(
+                "peak_threshold_ratio", "Umbral relativo de los picos", 0.001, 0.0, 1.0,
+                decimals=6,
+                help_text="Fracción de la altura máxima de la PSD. 0.001 = 0.1%, como en el prototipo y el correo. No es un porcentaje de la energía integrada.",
+            ),
+        ),
+        "#9B6330",
+        local_reference_file="references/metodoJorgeMartinezNoviembre2024.pdf",
+        local_reference_page=1,
+        reference_basis="correo electrónico",
+    ),
+    MethodSpec(
+        "tokunaga_bridge",
+        "TK",
+        "Tokunaga · Reconstrucción híbrida",
+        2022,
+        "Estima la escala carga/rigidez y combina bajas frecuencias teóricas con desplazamiento integrado de la aceleración medida.",
+        "Flecha en el punto del acelerómetro de un vano ferroviario simplemente apoyado, con forma del primer modo y ejes a velocidad constante.",
+        "Supone ejes de igual carga y respuesta dominada por el primer modo. La entrada automática y la frecuencia estimada deben verificarse. Usa la formulación de 2022 con geometría por ejes; no incluye la cancelación de ruido de 2024.",
+        "M. Tokunaga, M. Ikeda y K. Yoshida, Displacement response waveform restoration of simply support bridge during train passage based on measurement acceleration integration, JSCE A1 78(1), 47–60, 2022. Ecuaciones 2, 3c, 16–19, 27–29 y 33; apéndice.",
+        "https://doi.org/10.2208/jscejseee.78.1_47",
+        "Secciones 2–4, pp. 48–54; apéndice p. 59; ajuste en p. 52",
+        6,
+        "52",
+        ("Datos del paso", "Modelo espectral", "Integración medida", "Ajustar escala", "Sustituir banda baja", "Reconstruir"),
+        (
+            number("bridge_span_m", "Luz del vano Lb", 0.0, 0.0, 10000.0, suffix=" m", help_text="Dato requerido. Vano simplemente apoyado; aceleración vertical bajo la vía. El modelo no representa vanos continuos ni torsión."),
+            number("sensor_position_m", "Sensor desde apoyo de entrada", 0.0, 0.0, 10000.0, suffix=" m", help_text="Dato requerido, dentro del vano: 0 < x < Lb. El desplazamiento se calcula en este punto con la forma del primer modo sin(πx/Lb); en centro de vano x=Lb/2."),
+            choice("entry_mode", "Entrada del primer eje", "automatic", (("Estimar por energía de la señal", "automatic"), ("Tiempo definido por el analista", "manual")), help_text="Ayuda DESP: la detección por energía aproxima la entrada; revísala en la gráfica y usa un tiempo manual si conoces el instante. El registro debe incluir reposo previo, paso completo y vibración posterior."),
+            number("entry_time_s", "Entrada del primer eje t₀", 0.0, -100000.0, 100000.0, decimals=4, suffix=" s", help_text="Tiempo del registro en que el primer eje entra al vano. Debe incluirse el paso completo y señal posterior."),
+            number("train_speed_kmh", "Velocidad del tren", 0.0, 0.0, 500.0, suffix=" km/h", help_text="Dato requerido; se supone constante durante el paso."),
+            choice("train_geometry_mode", "Geometría del tren", "axle_spacings", (("Separaciones entre ejes", "axle_spacings"), ("Vehículos regulares de cuatro ejes", "regular_vehicles")), help_text="El preajuste utiliza seis ejes de igual carga en sus posiciones reales. La alternativa reproduce la composición regular de vehículos de cuatro ejes del artículo."),
+            AXLE_SPACINGS,
+            integer("vehicle_count", "Número de vehículos nv", 0, 0, 200, help_text="Dato requerido. Cada vehículo tiene dos bogies de dos ejes y la misma geometría y carga por eje."),
+            number("vehicle_length_m", "Repetición entre vehículos Lv", 0.0, 0.0, 100.0, suffix=" m", help_text="Distancia entre primeros ejes de vehículos consecutivos. No es la longitud total del tren."),
+            number("axle_spacing_m", "Separación de ejes del bogie a", 0.0, 0.0, 100.0, suffix=" m", help_text="Los cuatro ejes de cada vehículo se sitúan en 0, a, b y a+b."),
+            number("bogie_spacing_m", "Separación entre bogies b", 0.0, 0.0, 100.0, suffix=" m", help_text="Distancia entre centros de bogies. Se exige 0 < a < b y a+b < Lv."),
+            choice("frequency_mode", "Frecuencia del primer modo", "span_estimate", (("Estimar con la luz del vano", "span_estimate"), ("Frecuencia identificada manualmente", "manual")), help_text="Ecuación 33 del artículo: fb=50·Lb^(−0.8) Hz, con Lb en metros. Aproximación usada en sus casos numéricos de puentes ferroviarios de hormigón simplemente apoyados; verificar con vibración libre tras el paso y sustituir por el valor identificado."),
+            number("natural_frequency_hz", "Frecuencia del primer modo fb", 0.0, 0.0, 500.0, decimals=4, suffix=" Hz", help_text="Frecuencia identificada para el vano: buscar el primer modo en la vibración libre después de la salida del tren. La frecuencia de paso de los ejes no equivale necesariamente a la frecuencia propia."),
+            number("damping_ratio", "Amortiguamiento ζ", 0.02, 0.0001, 0.5, decimals=4, help_text="Fracción crítica: 0.02 = 2 %. Valor de los ejemplos publicados, a verificar para el puente."),
+            choice("deflection_direction", "Signo de la flecha bajo carga", "negative", (("Negativa", "negative"), ("Positiva", "positive")), help_text="Debe corresponder a la polaridad del acelerómetro. El ajuste de magnitudes no identifica el signo."),
+            choice("band_mode", "Bandas de reconstrucción", "publication", (("Reglas de la publicación 2022", "publication"), ("Definidas por el analista", "manual")), help_text="Automático: f₁=max(1/π,0.1fb), f₂=0.6fb, fm=max(0.1/π,0.6fb), en Hz. El resumen de 2023 usa otro límite inferior."),
+            number("fit_min_hz", "Inicio de banda de ajuste f₁", 0.5, 0.0001, 500.0, decimals=4, suffix=" Hz"),
+            number("fit_max_hz", "Fin de banda de ajuste f₂", 2.0, 0.0001, 500.0, decimals=4, suffix=" Hz"),
+            number("replacement_hz", "Frontera de sustitución fm", 2.0, 0.0001, 500.0, decimals=4, suffix=" Hz", help_text="Corte abrupto publicado: modelo para f<fm; integración medida para f≥fm. Debe estar por debajo de fb."),
+            number("spectral_floor_ratio", "Umbral relativo de ceros del modelo", 0.01, 0.0, 0.5, decimals=4, help_text="Salvaguarda numérica DESP: excluye del ajuste bins cuyo modelo sea menor que esta fracción del máximo de la banda. 0 sólo excluye ceros numéricos. Se muestran los puntos excluidos."),
+            toggle("remove_acceleration_mean", "Retirar media antes de la FFT", True, "Acondicionamiento DESP: resta la media de aceleración antes del relleno con ceros para evitar que el sesgo produzca fugas espectrales. No impone media ni residual cero al desplazamiento."),
+            integer("padding_factor", "Factor de relleno FFT", 2, 1, 8, help_text="Extensión numérica DESP: añade ceros al final para separar las copias periódicas. No añade mediciones ni resolución física; 1 conserva la longitud original."),
+        ),
+        "#B16D38",
+        local_reference_file="references/tokunaga_bridge_displacement_2022.pdf",
+        local_reference_page=6,
         reference_basis="publicación",
     ),
 )

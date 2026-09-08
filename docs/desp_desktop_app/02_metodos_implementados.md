@@ -6,6 +6,11 @@ independientes en la carpeta recibida. La implementación traduce los flujos a
 Python y convierte en controles las decisiones que los scripts solicitaban por
 consola.
 
+El catálogo añade Bunce (2023), la propuesta de superposición modal de Jorge
+Luis Martínez Valencia (JM, 2024) y Tokunaga et al. (TK, 2022). Para JM, la
+referencia es el correo PDF local y la implementación original en
+`easy_ama_jmpc`; estos tres métodos no forman parte de la tesis.
+
 ```mermaid
 flowchart TB
     TL[TL: PB + PA en a, v y d]
@@ -16,6 +21,8 @@ flowchart TB
     DA[DA: ajuste lineal/cuadrático/bilineal]
     PA[PA: medias de aceleración y velocidad]
     BU[BU: ventanas + detrend + QC de puente/tren]
+    JM[JM: PSD + picos + transferencias modales + IFFT]
+    TK[TK: tren + modelo de viga + ajuste de escala + sustitución espectral]
 ```
 
 El detalle equivalente se conserva en `methods_overview.mmd`.
@@ -32,6 +39,8 @@ El detalle equivalente se conserva en `methods_overview.mmd`.
 | DA | Darragh et al., 2004 | Ajuste lineal, cuadrático o bilineal continuo en velocidad; selección manual o por MSE | Flujo PEER cercano a falla | La forma funcional exige criterio |
 | PA | Park et al., 2005 | Sustracción de medias en aceleración y velocidad | Vibración de puentes y residual cero | No distingue error instrumental de señal física |
 | BU | Bunce et al., 2023 | Búsqueda de ventanas, tendencia lineal, doble integración, rechazo de levantamiento y calidad por hombros/picos | Paso de vehículos y trenes sobre puentes | Exige señal de reposo antes/después y acelerómetro de muy bajo ruido |
+| JM | Jorge Luis Martínez Valencia, 2024 | PSD Welch, selección de picos por altura, amortiguamiento común, superposición de transferencias modales y transformada inversa | Exploración de respuesta dinámica con el procedimiento de `easy_ama_jmpc` | Sensible al amortiguamiento y a los picos elegidos; requiere contraste independiente |
+| TK | Tokunaga, Ikeda y Yoshida, 2022 | Fuerza modal por geometría del tren, ajuste de P0/kb y sustitución de la banda baja por solución teórica; banda superior integrada desde la medición | Paso de tren por un vano simplemente apoyado; desplazamiento en la posición declarada del sensor | Entrada y frecuencia iniciales estimadas, sustituibles por datos identificados; no incluye la cancelación de ruido de 2024 |
 
 ## Correspondencia y límites
 
@@ -72,12 +81,34 @@ El detalle equivalente se conserva en `methods_overview.mmd`.
 11. **Bunce:** no filtra la aceleración. Prueba ventanas con diferentes inicios y
     finales, ajusta una recta por ventana y clasifica el resultado según la
     estabilidad de velocidad antes y después de la carga. El modo ferroviario
-    calcula los tiempos de los picos esperados con luz, posición del sensor,
-    longitud entre ejes extremos, puntos medios entre conjuntos de ejes y
-    duración observada o velocidad; también admite tiempos manuales.
+    inicia con seis ejes separados por `17.4, 17.75, 17.75, 17.75, 17.4 m` y
+    usa la velocidad introducida para calcular los tiempos de los puntos medios
+    entre ellos al pasar por el sensor. Luz, velocidad y posición del sensor
+    son datos manuales. Conserva la duración observada como alternativa y los
+    modos de puntos medios o tiempos manuales.
+12. **JM:** reproduce la última gráfica de `easy_ama_jmpc`, incluidos sus valores
+    iniciales de 20 picos y amortiguamiento `0.002` (0.2 %). El correo propone
+    `0.035` (3.5 %) como supuesto general; se conserva la diferencia explícita.
+    Welch y el umbral de picos son configurables. El desplazamiento procede de
+    la superposición en frecuencia; la velocidad es un diagnóstico derivado
+    del desplazamiento para el contrato común de comparación y exportación.
+    No se resta la media de la aceleración de entrada ni se fuerza un residual
+    nulo. La guía [JM 2024](13_metodo_jorge_martinez_2024.md) detalla cada etapa.
+13. **TK:** usa las ecuaciones de 2022 y los límites de frecuencia de esa
+    versión. La fuente inglesa de 2023 cambia el límite inferior de ajuste; no
+    se mezclan esos valores. Comparte las separaciones iniciales de seis ejes
+    con BU y conserva la alternativa de vehículos regulares. Requiere luz,
+    velocidad y posición del sensor. La entrada inicial se estima por energía y
+    la frecuencia con `50 Lb^(-0.8) Hz`, relación de los casos numéricos del
+    artículo; ambas admiten valores manuales. La retirada opcional de media,
+    la exclusión de ceros espectrales, el relleno, la detección de entrada y los
+    diagnósticos de coherencia son
+    decisiones de DESP. La [guía de TK](14_metodo_tokunaga.md) documenta el
+    modelo, las bandas y el significado de la escala estimada.
 
-Por estas diferencias, el estado correcto es **implementación funcional del
-flujo**, todavía no **equivalencia certificada con MATLAB**.
+Para los métodos derivados de la tesis, el estado correcto es **implementación
+funcional del flujo**, todavía no **equivalencia certificada con MATLAB**. BU,
+JM y TK se contrastan con sus propias fuentes, no con los apéndices MATLAB.
 
 La auditoría detallada, sus hallazgos y los métodos candidatos posteriores a la
 tesis están en `07_auditoria_y_estado_del_arte.md`.
@@ -96,5 +127,18 @@ tesis están en `07_auditoria_y_estado_del_arte.md`.
   <https://doi.org/10.1016/j.engstruct.2004.10.013>
 - A. Bunce et al., *Mechanical Systems and Signal Processing* 200, 2023:
   <https://doi.org/10.1016/j.ymssp.2023.110554>
+- Jorge Luis Martínez Valencia, propuesta de cálculo de desplazamiento por
+  superposición modal, noviembre de 2024 según el nombre del archivo,
+  [correo electrónico conservado en PDF](../../desp_desktop_app/references/metodoJorgeMartinezNoviembre2024.pdf),
+  pp. 1-2; implementación de referencia en
+  [`easy_ama_jmpc/callbacks/app_callbacks.py`](../../easy_ama_jmpc/callbacks/app_callbacks.py).
+- M. Tokunaga, M. Ikeda y K. Yoshida, *Displacement response waveform
+  restoration of simply support bridge during train passage based on
+  measurement acceleration integration*, JSCE A1 78(1), 47–60, 2022:
+  <https://doi.org/10.2208/jscejseee.78.1_47>;
+  [PDF local](../../desp_desktop_app/references/tokunaga_bridge_displacement_2022.pdf).
+- M. Tokunaga y M. Ikeda, *Structural Performance Evaluation of Existing
+  Bridges Based on Acceleration Monitoring*, QR of RTRI 64(2), 115–120, 2023:
+  <https://doi.org/10.2219/rtriqr.64.2_115>
 - Tesis local y copia institucional:
   <https://ri.uaemex.mx/handle/20.500.11799/57875>

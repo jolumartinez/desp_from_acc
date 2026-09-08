@@ -17,10 +17,40 @@ y un manifiesto. Se generan sin aleatoriedad con
 Las pruebas automatizadas comprueban:
 
 - lectura multicanal y conversión de `cm/s²` y `g`;
-- forma, finitud y etapas de los ocho métodos;
+- forma, finitud y etapas de los métodos con señales adecuadas a sus hipótesis;
 - reconstrucción del armónico limpio con Park;
 - conversión del formato K-NET ASCII;
 - generación offline de HTML, PDF, CSV y JSON.
+
+En la verificación de la incorporación de JM, el 8 de septiembre de 2026, la
+suite completa pasó **74 pruebas**, incluidas 14 nuevas de cálculo, informes y
+contratos de interfaz para el método.
+
+Además, ocho comparaciones contra la función original de `easy_ama_jmpc`
+produjeron un **error absoluto máximo de 0** entre los vectores de desplazamiento:
+X, Y y Z del registro de vía 1 (21 095 muestras a 500 Hz) y del registro de vía 2
+(10 841 muestras a 250 Hz), con los valores iniciales; y Z de ambos archivos con
+amortiguamiento 0.035. Se mantuvieron 20 modos, Welch de 512 muestras y umbral
+0.001. El código original se extrajo para este contraste sin iniciar Dash.
+
+Estas comparaciones verifican fidelidad al código recibido, no exactitud física
+frente a desplazamientos medidos. Los extremos de Z **no coinciden con las
+cifras del correo**, ni con el amortiguamiento inicial 0.002 ni al cambiarlo a
+0.035. No se dispone de la configuración histórica completa ni del segmento
+exacto usado para generar aquellas cifras. La
+[guía de JM](13_metodo_jorge_martinez_2024.md#validación-realizada)
+conserva los resultados numéricos y esta limitación.
+
+TK necesita un caso ferroviario coherente con luz, ejes, velocidad y posición
+del sensor configurados. Las propuestas iniciales de entrada por energía y de
+frecuencia por luz deben contrastarse con el evento y, cuando sea posible, con
+vibración libre posterior al paso. La lista inicial de seis ejes es configurable
+y no sustituye la geometría real. Su verificación debe separar la recuperación de una solución
+analítica conocida de la validación frente a desplazamientos medidos. La
+[guía de TK](14_metodo_tokunaga.md) identifica la formulación de 2022, las
+salvaguardas añadidas por DESP y la diferencia con el método publicado en 2024.
+Una prueba numérica no acredita por sí sola su uso en puentes continuos,
+tráfico mixto o pasos con baja relación señal/ruido.
 
 ## Datos usados en la tesis
 

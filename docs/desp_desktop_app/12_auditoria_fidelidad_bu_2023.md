@@ -73,10 +73,13 @@ artículo. Además, el máximo de candidatos puede adelgazar la malla: esto prot
 la aplicación frente a cálculos excesivos, pero deja de ser una búsqueda
 exhaustiva si no se usa un periodo de muestra como paso y un límite suficiente.
 
-La versión actual no recibe una tabla de posiciones y cargas de los ejes. Recibe
-la longitud entre ejes extremos y los `m_i` ya definidos por el analista; por
-tanto, no puede demostrar que cada rama observada corresponda a un eje concreto.
-La geometría sólo predice tiempos de recuperación y se aplica después de integrar.
+La configuración actual permite derivar posiciones y puntos medios desde las
+separaciones entre ejes; el preajuste tiene seis ejes y cinco huecos. También
+conserva la entrada manual de longitud entre ejes extremos y `m_i`. No recibe
+cargas individuales ni calcula la línea de influencia, por lo que no demuestra
+que cada rama observada corresponda a un eje concreto. La elección de cada
+hueco como candidato a recuperación es una ayuda de DESP. La geometría sólo
+predice tiempos de recuperación y se aplica después de integrar.
 
 La hipótesis de `P_i` próximos a cero fue demostrada en un vano ferroviario de
 14.8 m cuya longitud era comparable con la separación entre conjuntos de ejes.

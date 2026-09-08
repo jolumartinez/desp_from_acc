@@ -70,8 +70,12 @@ class ThesisPresetTests(unittest.TestCase):
             self.assertEqual(default_parameters(spec.method_id)["integration"], "simpson")
         bunce = default_parameters("bunce_bridge")
         self.assertEqual(bunce["integration"], "trapezoid")
-        self.assertEqual(bunce["quality_mode"], "shoulders")
+        # The project preset now targets the user's six-axle train; the
+        # publication's integration and recovery thresholds remain available.
+        self.assertEqual(bunce["quality_mode"], "train")
         self.assertEqual(bunce["train_peak_source"], "geometry")
+        self.assertEqual(bunce["train_geometry_mode"], "axle_spacings")
+        self.assertEqual(bunce["train_timing_basis"], "speed")
         self.assertEqual(
             (
                 bunce["minimum_peak_spacing_s"],

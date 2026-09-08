@@ -6,7 +6,7 @@ flowchart LR
     X --> A[SignalRecord activo con t=0]
     A --> Q[QThread supervisor]
     Q --> E[Proceso hijo descartable]
-    E --> N[Motor de métodos / NumPy + SciPy]
+    E --> N[Motor de diez métodos / NumPy + SciPy]
     E -->|etapas por cola| Q
     E --> R[MethodResult]
     E --> PR[PartialMethodResult]

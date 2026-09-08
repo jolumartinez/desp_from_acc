@@ -52,16 +52,34 @@ método publicado. El analista debe inspeccionarla y puede sustituirla por lími
 manuales. Si la detección no es concluyente, el método no ejecuta con tiempos
 inventados.
 
-El preajuste usa el **control básico por hombros**. El control ferroviario se
-activa expresamente y exige al menos dos recuperaciones `P_i` esperadas. Estas se pueden
-introducir como tiempos desde la entrada o calcular con la geometría que indica
-la publicación:
+El preajuste usa el **control ferroviario** (`quality_mode = train`) y la
+velocidad como base temporal (`train_timing_basis = speed`). Para ejecutar esa
+configuración hay que introducir la luz del vano, la velocidad y la posición del
+sensor medida desde el apoyo de entrada. La aplicación no estima estos tres
+datos. El control básico por hombros sigue disponible si no corresponde
+esperar recuperaciones entre ejes.
+
+La geometría inicial se introduce como separaciones entre ejes, igual que en TK:
+
+```text
+train_geometry_mode = axle_spacings
+axle_spacings_m      = 17.4, 17.75, 17.75, 17.75, 17.4
+posiciones de ejes  = 0, 17.4, 35.15, 52.9, 70.65, 88.05 m
+longitud entre ejes extremos = 88.05 m
+puntos medios m_i   = 8.7, 26.275, 44.025, 61.775, 79.35 m
+```
+
+Cinco separaciones definen seis ejes. La lista es editable, usa metros y punto
+decimal, y deriva la longitud y los cinco puntos medios entre ejes consecutivos.
+No hay que volver a introducir esos valores derivados. Se suman la posición del
+sensor y el instante de entrada para obtener los tiempos previstos:
 
 ```text
 L   = B + longitud entre el primer y el último eje
 d_i = m_i + x_sensor
 P_i = (d_i / L) T                 usando la duración observada
 P_i = d_i / v                     usando una velocidad conocida
+t_i = t_entrada + P_i             en el eje temporal del registro
 ```
 
 `B` es la luz del vano, `x_sensor` se mide desde el apoyo por el que entra el
@@ -70,11 +88,18 @@ conjuntos de ejes consecutivos. Para un sensor en centro de vano,
 `x_sensor=B/2`, como en el artículo. No debe usarse la longitud entre topes si
 difiere de la distancia entre ejes extremos.
 
-La aplicación no decide por sí sola qué ejes forman un conjunto o bogie: esa
-agrupación tiene significado mecánico y la define el analista. A partir de la
-geometría introducida calcula `P_i`, la velocidad efectiva, la distancia total
-de cruce y la diferencia entre la duración observada y la estimada. Todos esos
-valores quedan en los diagnósticos y en el informe.
+En el modo inicial, cada hueco entre los seis ejes se trata como candidato a una
+recuperación. Es una convención de configuración de DESP: no demuestra que el
+puente llegue a descargarse ni que aparezca un pico en todos esos instantes.
+Si las recuperaciones corresponden a conjuntos de ejes o bogies, la opción
+`manual_midpoints` conserva los campos anteriores de longitud entre ejes
+extremos y puntos medios definidos por el analista. También se pueden introducir
+directamente tiempos de recuperación desde la entrada.
+
+A partir de la geometría calcula `P_i`, la velocidad efectiva, la distancia
+total de cruce y la diferencia entre la duración observada y la estimada. Todos
+esos valores quedan en los diagnósticos y en el informe. El control ferroviario
+necesita al menos dos recuperaciones previstas.
 
 ### Picos y valles en la terminología de BU
 
@@ -103,9 +128,11 @@ cargar el puente simultáneamente y la hipótesis ferroviaria pierde validez.
 | Dirección y levantamiento | Rechazo físico según la convención del acelerómetro; la opción automática registra la excursión dominante |
 | Control de calidad | `Hombros` funciona sólo con la señal; `Tren` exige dos o más recuperaciones `P_i` |
 | Luz y posición del sensor | Geometría del vano en la dirección de circulación |
-| Longitud entre ejes extremos | Recorrido del tren que interviene en `L` |
-| Puntos medios `m_i` | Centros de los huecos que originan recuperaciones; lista creciente desde el primer eje |
-| Base temporal | Duración observada `T` o velocidad aproximada `v` |
+| Separaciones entre ejes | Cinco distancias iniciales que generan seis posiciones y cinco puntos medios; lista editable |
+| Modo de geometría | Separaciones entre ejes inicialmente, o longitud y puntos medios manuales |
+| Longitud entre ejes extremos | Recorrido del tren que interviene en `L`; derivado de las separaciones o introducido en modo manual |
+| Puntos medios `m_i` | Centros de huecos previstos; derivados entre ejes consecutivos o definidos manualmente entre conjuntos |
+| Base temporal | Velocidad `v` inicialmente; duración observada `T` como alternativa |
 | Recuperaciones manuales | Alternativa auditable cuando los tiempos `P_i` ya fueron calculados externamente |
 | Separación mínima | Equivalente a `MinPeakDistance`; 1.5 s en el ensayo publicado |
 | Anchura mínima | Equivalente a `MinPeakWidth`; 1.5 s en el ensayo publicado |
@@ -114,7 +141,14 @@ cargar el puente simultáneamente y la hipótesis ferroviaria pierde validez.
 
 ### Ejemplo de captura
 
-Para `B=20 m`, sensor a `10 m`, tren entre ejes extremos de `40 m`, duración
+Con los seis ejes iniciales, `B=20 m`, sensor a `10 m` y velocidad `54 km/h`
+(`15 m/s`), el recorrido total es `108.05 m` y la duración prevista es
+`7.2033 s`. Los tiempos de recuperación desde la entrada son aproximadamente
+`1.2467`, `2.4183`, `3.6017`, `4.7850` y `5.9567 s`. Estos números comprueban la
+geometría y los tiempos; no garantizan cinco recuperaciones físicas.
+
+Como ejemplo de la alternativa `manual_midpoints`, para `B=20 m`, sensor a
+`10 m`, tren entre ejes extremos de `40 m`, duración
 observada `T=4 s` y puntos medios `m_i=5, 15, 25 m`, la aplicación obtiene
 `L=60 m`, una velocidad efectiva de `15 m/s` (`54 km/h`) y picos a `1.000`,
 `1.667` y `2.333 s` después de la entrada.
